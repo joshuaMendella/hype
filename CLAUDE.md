@@ -35,13 +35,25 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - [x] ChatPanel component — collapsible bottom-right overlay
 - [x] /api/chat — Claude Haiku interviewer, persists messages to DB
 
+## Claude Code plugins installed (user-scoped, active next session)
+- `context-mode` — keeps large outputs out of context window (was pre-installed)
+- `claude-code-setup` — run "recommend automations for this project" at session start
+- `frontend-design` — auto-activates when building UI
+- `ponytail` — prevents over-engineering, enforces minimum viable code
+
+## START OF NEXT SESSION checklist
+1. Run `git log --oneline -5` to confirm state
+2. Run "recommend automations for this project" to let claude-code-setup analyse the stack
+3. Joshua to test the app first: add ANTHROPIC_API_KEY to apps/web/.env.local, run `cd apps/web && pnpm dev`
+
 ## What's NOT done yet (next steps in order)
-1. Extraction pipeline — after AI conversation, extract facts → write vault notes → update graph in real time
-2. Vault API route — POST /api/vault to create/update notes and links
-3. Real-time graph updates — Supabase Realtime subscription in GraphCanvas
-4. Landing page — marketing page at / (currently redirects to /signup)
-5. Vercel deployment
-6. Anthropic API key needs to be added to .env.local before AI works
+1. ANTHROPIC_API_KEY — Joshua needs to add to apps/web/.env.local before AI works
+2. Run claude-code-setup analysis — will recommend MCP servers, hooks, subagents
+3. Extraction pipeline — after AI conversation, extract facts → write vault notes → update graph in real time
+4. Vault API route — POST /api/vault to create/update notes and links
+5. Real-time graph updates — Supabase Realtime subscription in GraphCanvas
+6. Landing page — marketing page at / (currently redirects to /signup)
+7. Vercel deployment
 
 ## Common commands
 ```bash
