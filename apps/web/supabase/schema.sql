@@ -1,0 +1,144 @@
+-- ============================================================
+-- HYPE — Database Schema
+-- Run this in: Supabase Dashboard > SQL Editor > New query
+-- ============================================================
+
+-- Profiles (extends auth.users, auto-created on signup)
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id          UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
+  email       TEXT,
+  display_name TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Vault notes (each note = one graph node)
+CREATE TABLE IF NOT EXISTS public.vault_notes (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id     UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  path        TEXT NOT NULL,        -- e.g. "Style/preferences.md"
+  title       TEXT NOT NULL,
+  topic       TEXT,                 -- Work | Style | Food | Fitness | People | Goals | Insights | Profile
+  content_md  TEXT DEFAULT '',
+  confidence  FLOAT DEFAULT 0.8,   -- 0–1: how certain the AI is about this info
+  source      TEXT DEFAULT 'conversation', -- conversation | inferred | user-confirmed | system
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, path)
+);
+
+-- Vault links (edges between notes in the graph)
+CREATE TABLE IF NOT EXISTS public.vault_links (
+  id               UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id          UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  source_note_id   UUID REFERENCES public.vault_notes(id) ON DELETE CASCADE NOT NULL,
+  target_note_id   UUID REFERENCES public.vault_notes(id) ON DELETE CASCADE NOT NULL,
+  anchor_text      TEXT,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(source_note_id, target_note_id)
+);
+
+-- Conversations
+CREATE TABLE IF NOT EXISTS public.conversations (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id     UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  status      TEXT DEFAULT 'active' CHECK (status IN ('active', 'completed')),
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Messages within conversations
+CREATE TABLE IF NOT EXISTS public.messages (
+  id                UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  conversation_id   UUID REFERENCES public.conversations(id) ON DELETE CASCADE NOT NULL,
+  role              TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+  content           TEXT NOT NULL,
+  created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Audit trail: which notes were created from which conversation
+CREATE TABLE IF NOT EXISTS public.extractions (
+  id                UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  conversation_id   UUID REFERENCES public.conversations(id) ON DELETE CASCADE NOT NULL,
+  note_id           UUID REFERENCES public.vault_notes(id) ON DELETE CASCADE NOT NULL,
+  created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================================
+-- ROW LEVEL SECURITY
+-- Users can only access their own data — enforced at DB level
+-- ============================================================
+
+ALTER TABLE public.profiles     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vault_notes  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vault_links  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.conversations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.messages     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.extractions  ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "profiles: own"       ON public.profiles     FOR ALL USING (auth.uid() = id);
+CREATE POLICY "vault_notes: own"    ON public.vault_notes  FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "vault_links: own"    ON public.vault_links  FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "conversations: own"  ON public.conversations FOR ALL USING (auth.uid() = user_id);
+
+CREATE POLICY "messages: own conversations" ON public.messages FOR ALL
+  USING (conversation_id IN (
+    SELECT id FROM public.conversations WHERE user_id = auth.uid()
+  ));
+
+CREATE POLICY "extractions: own conversations" ON public.extractions FOR ALL
+  USING (conversation_id IN (
+    SELECT id FROM public.conversations WHERE user_id = auth.uid()
+  ));
+
+-- ============================================================
+-- TRIGGERS
+-- ============================================================
+
+-- Auto-create profile row when a user signs up
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email)
+  VALUES (NEW.id, NEW.email)
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- Auto-create the root "_profile.md" note (center node of the graph) on signup
+CREATE OR REPLACE FUNCTION public.handle_new_user_vault()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.vault_notes (user_id, path, title, topic, content_md, source)
+  VALUES (
+    NEW.id,
+    '_profile.md',
+    'You',
+    'Profile',
+    E'---\ntitle: You\ntopic: Profile\n---\n\nYour personal knowledge graph starts here.',
+    'system'
+  )
+  ON CONFLICT (user_id, path) DO NOTHING;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE TRIGGER on_profile_created
+  AFTER INSERT ON public.profiles
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user_vault();
+
+-- ============================================================
+-- INDEXES (for graph query performance)
+-- ============================================================
+
+CREATE INDEX IF NOT EXISTS idx_vault_notes_user    ON public.vault_notes(user_id);
+CREATE INDEX IF NOT EXISTS idx_vault_links_user    ON public.vault_links(user_id);
+CREATE INDEX IF NOT EXISTS idx_vault_links_source  ON public.vault_links(source_note_id);
+CREATE INDEX IF NOT EXISTS idx_vault_links_target  ON public.vault_links(target_note_id);
+CREATE INDEX IF NOT EXISTS idx_messages_conv       ON public.messages(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_conversations_user  ON public.conversations(user_id);
