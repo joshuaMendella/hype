@@ -12,7 +12,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - **Web**: Next.js 16 + TypeScript + Tailwind CSS (apps/web)
 - **Mobile**: React Native + Expo — not started yet (apps/mobile)
 - **Database**: Supabase (Postgres + Auth) — project ref: aykjvvtolkaqvijfeewn
-- **AI**: Anthropic Claude API — Haiku for chat, Sonnet for synthesis
+- **AI**: Groq (Llama 3.3 70B) — chat interviewer, free tier. Anthropic Sonnet — planned for extraction synthesis
 - **Graph**: D3 force simulation (custom, no react-force-graph)
 - **Deploy**: Vercel (not yet configured)
 
@@ -23,17 +23,17 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - RLS enabled on all tables — users can only access their own data
 - Three Supabase clients: `lib/supabase/client.ts` (browser), `lib/supabase/server.ts` (SSR), `lib/supabase/admin.ts` (server-only, bypasses RLS)
 
-## What's been built (as of 2026-06-23)
+## What's been built (as of 2026-06-24)
 - [x] Monorepo scaffold (Turborepo, pnpm, TypeScript)
 - [x] Next.js app scaffolded in apps/web
 - [x] Supabase schema: profiles, vault_notes, vault_links, conversations, messages, extractions
 - [x] RLS policies + triggers (auto-create profile + root vault note on signup)
 - [x] Auth middleware (protects /graph, redirects unauthenticated)
 - [x] Login + Signup pages (/login, /signup)
-- [x] Graph page (/graph) — full-screen D3 force graph + chat panel overlay
+- [x] Graph page (/graph) — full-screen D3 force graph + conversational UI overlay
 - [x] GraphCanvas component — Obsidian-style, topic colors, zoom/pan/drag, tooltips
-- [x] ChatPanel component — collapsible bottom-right overlay
-- [x] /api/chat — Claude Haiku interviewer, persists messages to DB
+- [x] ChatPanel component — full-screen conversational UI (AI top-center, input bottom-center, typewriter reveal, Poppins font)
+- [x] /api/chat — Groq Llama 3.3 70B interviewer, persists messages to DB, tuned system prompt
 
 ## Claude Code plugins installed (user-scoped, active next session)
 - `context-mode` — keeps large outputs out of context window (was pre-installed)
@@ -43,17 +43,16 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 
 ## START OF NEXT SESSION checklist
 1. Run `git log --oneline -5` to confirm state
-2. Run "recommend automations for this project" to let claude-code-setup analyse the stack
-3. Joshua to test the app first: add ANTHROPIC_API_KEY to apps/web/.env.local, run `cd apps/web && pnpm dev`
+2. Run `cd apps/web && pnpm dev` to start the dev server
+3. GROQ_API_KEY is already in apps/web/.env.local — chat is working
 
 ## What's NOT done yet (next steps in order)
-1. ANTHROPIC_API_KEY — Joshua needs to add to apps/web/.env.local before AI works
-2. Run claude-code-setup analysis — will recommend MCP servers, hooks, subagents
-3. Extraction pipeline — after AI conversation, extract facts → write vault notes → update graph in real time
-4. Vault API route — POST /api/vault to create/update notes and links
-5. Real-time graph updates — Supabase Realtime subscription in GraphCanvas
-6. Landing page — marketing page at / (currently redirects to /signup)
-7. Vercel deployment
+1. Vault context injection — pull user's vault notes into system prompt so AI remembers across sessions
+2. Extraction pipeline — after conversation, extract facts → write vault notes → update graph in real time
+3. Vault API route — POST /api/vault to create/update notes and links
+4. Real-time graph updates — Supabase Realtime subscription in GraphCanvas
+5. Landing page — marketing page at / (currently redirects to /signup)
+6. Vercel deployment
 
 ## Common commands
 ```bash
@@ -78,7 +77,8 @@ pnpm dev  # runs all apps via turbo
 NEXT_PUBLIC_SUPABASE_URL=https://aykjvvtolkaqvijfeewn.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
-ANTHROPIC_API_KEY=...  ← still needs to be added
+GROQ_API_KEY=...          ← chat (free, console.groq.com)
+ANTHROPIC_API_KEY=...     ← planned for extraction synthesis (not yet needed)
 ```
 
 ## File structure

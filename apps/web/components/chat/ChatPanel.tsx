@@ -1,45 +1,74 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
-import type { Message } from "@/types/database"
-
-interface Props {
-  userId: string
-}
+import { useState, useRef, useEffect, useCallback } from "react"
 
 interface ChatMessage {
   role: "user" | "assistant"
   content: string
 }
 
-export default function ChatPanel({ userId }: Props) {
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+const OPENING =
+  "Hey — I'm here to get to know you a little. What's something you've been genuinely into lately?"
+
+// ponytail: word-by-word reveal via recursive setTimeout, no animation lib
+function useTypewriter(text: string, speed = 52) {
+  const [displayed, setDisplayed] = useState("")
+  const [done, setDone] = useState(false)
+
+  useEffect(() => {
+    setDisplayed("")
+    setDone(false)
+    const words = text.split(" ")
+    let i = 0
+    let timer: ReturnType<typeof setTimeout>
+
+    function tick() {
+      i++
+      setDisplayed(words.slice(0, i).join(" "))
+      if (i < words.length) timer = setTimeout(tick, speed)
+      else setDone(true)
+    }
+
+    timer = setTimeout(tick, speed)
+    return () => clearTimeout(timer)
+  }, [text, speed])
+
+  return { displayed, done }
+}
+
+export default function ChatPanel({ userId }: { userId: string }) {
+  const [history, setHistory] = useState<ChatMessage[]>([])
+  const [currentAi, setCurrentAi] = useState(OPENING)
+  const [aiVisible, setAiVisible] = useState(true)
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
-  const [open, setOpen] = useState(true)
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLTextAreaElement>(null)
-
-  // Kick off with the AI's opening message
-  useEffect(() => {
-    setMessages([{
-      role: "assistant",
-      content: "Hey! I'm here to get to know you a little. What's something you've been really into lately — could be anything.",
-    }])
-  }, [])
+  const [canInput, setCanInput] = useState(false)
+  const [focused, setFocused] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const { displayed, done } = useTypewriter(currentAi)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+    if (done) {
+      setCanInput(true)
+      inputRef.current?.focus()
+    }
+  }, [done])
 
-  async function send() {
+  const send = useCallback(async () => {
     const text = input.trim()
-    if (!text || loading) return
+    if (!text || loading || !canInput) return
 
-    const next: ChatMessage[] = [...messages, { role: "user", content: text }]
-    setMessages(next)
+    setCanInput(false)
     setInput("")
     setLoading(true)
+    setAiVisible(false)
+
+    const next: ChatMessage[] = [
+      ...history,
+      { role: "assistant", content: currentAi },
+      { role: "user", content: text },
+    ]
+    setHistory(next)
 
     try {
       const res = await fetch("/api/chat", {
@@ -47,125 +76,197 @@ export default function ChatPanel({ userId }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: next, userId }),
       })
-
-      if (!res.ok) throw new Error("Chat request failed")
-
+      if (!res.ok) throw new Error()
       const { reply } = await res.json()
-      setMessages((prev) => [...prev, { role: "assistant", content: reply }])
+      setCurrentAi(reply)
     } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "Something went wrong on my end. Mind trying again?" },
-      ])
+      setCurrentAi("Something slipped on my end — want to try that again?")
     } finally {
       setLoading(false)
-      inputRef.current?.focus()
+      setAiVisible(true)
     }
-  }
+  }, [input, loading, canInput, history, currentAi, userId])
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter") {
       e.preventDefault()
       send()
     }
   }
 
+  const borderColor = focused
+    ? "rgba(255,255,255,0.55)"
+    : canInput
+    ? "rgba(255,255,255,0.22)"
+    : "transparent"
+
   return (
-    <div
-      className={`
-        fixed bottom-6 right-6 z-40
-        flex flex-col
-        bg-[#111111]/95 backdrop-blur-md
-        border border-white/8 rounded-2xl
-        shadow-2xl shadow-black/60
-        transition-all duration-300 ease-in-out
-        ${open ? "w-[360px] h-[480px]" : "w-[180px] h-[44px]"}
-      `}
-    >
-      {/* Header */}
+    <div className="fixed inset-0 z-30 flex flex-col pointer-events-none select-none">
+      {/* ── AI voice — top center ─────────────────────────────────────── */}
       <div
-        className="flex items-center justify-between px-4 py-3 cursor-pointer select-none"
-        onClick={() => setOpen((v) => !v)}
+        className="pointer-events-none flex justify-center"
+        style={{
+          background:
+            "linear-gradient(to bottom, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.42) 62%, transparent 100%)",
+          paddingTop: "clamp(2.75rem, 5.5vw, 4.5rem)",
+          paddingBottom: "4.5rem",
+          paddingLeft: "clamp(1.5rem, 7vw, 9rem)",
+          paddingRight: "clamp(1.5rem, 7vw, 9rem)",
+        }}
       >
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-          <span className="text-sm font-medium text-white/80">Hype AI</span>
-        </div>
-        <span className="text-white/30 text-xs">{open ? "–" : "+"}</span>
+        <p
+          style={{
+            fontFamily: "var(--font-poppins), sans-serif",
+            fontSize: "clamp(1.3rem, 2.6vw, 1.85rem)",
+            fontWeight: 300,
+            lineHeight: 1.7,
+            color: "rgba(255,255,255,0.87)",
+            textAlign: "center",
+            maxWidth: "680px",
+            minHeight: "3.5rem",
+            opacity: aiVisible ? 1 : 0,
+            transition: "opacity 0.2s ease",
+          }}
+        >
+          {displayed}
+          {!done && (
+            <span
+              className="inline-block align-middle animate-pulse"
+              style={{
+                width: "2px",
+                height: "1em",
+                background: "#A78BFA",
+                marginLeft: "4px",
+                borderRadius: "1px",
+              }}
+            />
+          )}
+        </p>
       </div>
 
-      {open && (
-        <>
-          {/* Divider */}
-          <div className="h-px bg-white/5 mx-4" />
+      {/* ── Graph shows through here ──────────────────────────────────── */}
+      <div className="flex-1" />
 
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 scrollbar-none">
-            {messages.map((msg, i) => (
-              <div
-                key={i}
-                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={`
-                    max-w-[85%] text-sm leading-relaxed px-3 py-2 rounded-xl
-                    ${msg.role === "user"
-                      ? "bg-white text-black rounded-br-sm"
-                      : "bg-white/8 text-white/85 rounded-bl-sm"
-                    }
-                  `}
-                >
-                  {msg.content}
-                </div>
-              </div>
-            ))}
-
-            {loading && (
-              <div className="flex justify-start">
-                <div className="bg-white/8 px-3 py-2 rounded-xl rounded-bl-sm">
-                  <span className="flex gap-1">
-                    {[0, 1, 2].map((i) => (
-                      <span
-                        key={i}
-                        className="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce"
-                        style={{ animationDelay: `${i * 120}ms` }}
-                      />
-                    ))}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            <div ref={bottomRef} />
-          </div>
-
-          {/* Divider */}
-          <div className="h-px bg-white/5 mx-4" />
-
-          {/* Input */}
-          <div className="px-4 py-3 flex gap-2 items-end">
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Type something…"
-              rows={1}
-              className="flex-1 bg-transparent text-sm text-white placeholder:text-white/20 resize-none focus:outline-none leading-relaxed max-h-24 overflow-y-auto"
-              style={{ scrollbarWidth: "none" }}
-            />
-            <button
-              onClick={send}
-              disabled={!input.trim() || loading}
-              className="text-white/40 hover:text-white/90 disabled:opacity-20 transition-colors pb-0.5"
+      {/* ── User input — bottom center ────────────────────────────────── */}
+      <div
+        className="pointer-events-auto flex justify-center"
+        style={{
+          background:
+            "linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.38) 62%, transparent 100%)",
+          paddingBottom: "clamp(2.25rem, 4.5vw, 3.75rem)",
+          paddingTop: "4.5rem",
+          paddingLeft: "clamp(1.5rem, 7vw, 9rem)",
+          paddingRight: "clamp(1.5rem, 7vw, 9rem)",
+        }}
+      >
+        <div style={{ maxWidth: "540px", width: "100%" }}>
+          {/* Thinking dots while AI is responding */}
+          {loading && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                gap: "8px",
+                paddingBottom: "14px",
+              }}
             >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M1.5 1.5l13 6.5-13 6.5v-5l9-1.5-9-1.5v-5z" />
-              </svg>
-            </button>
-          </div>
-        </>
-      )}
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  className="animate-bounce"
+                  style={{
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    background: "rgba(167,139,250,0.55)",
+                    display: "inline-block",
+                    animationDelay: `${i * 0.12}s`,
+                    animationDuration: "0.85s",
+                  }}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Input line */}
+          {!loading && (
+            <div style={{ position: "relative" }}>
+              <input
+                ref={inputRef}
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onFocus={() => setFocused(true)}
+                onBlur={() => setFocused(false)}
+                disabled={!canInput}
+                placeholder={canInput ? "your answer…" : ""}
+                autoComplete="off"
+                spellCheck={false}
+                className="select-auto"
+                style={{
+                  width: "100%",
+                  background: "transparent",
+                  border: "none",
+                  borderBottom: `1px solid ${borderColor}`,
+                  color: "rgba(255,255,255,0.8)",
+                  fontSize: "1.08rem",
+                  lineHeight: 1.5,
+                  padding: "10px 36px 10px 0",
+                  outline: "none",
+                  caretColor: "#A78BFA",
+                  transition: "border-color 0.25s ease, opacity 0.2s ease",
+                  fontFamily: "inherit",
+                  opacity: canInput ? 1 : 0,
+                }}
+              />
+              {canInput && input.trim() && (
+                <button
+                  onClick={send}
+                  style={{
+                    position: "absolute",
+                    right: 0,
+                    bottom: "10px",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "rgba(255,255,255,0.32)",
+                    padding: 0,
+                    lineHeight: 1,
+                    transition: "color 0.18s ease",
+                  }}
+                  onMouseEnter={(e) =>
+                    (e.currentTarget.style.color = "rgba(255,255,255,0.72)")
+                  }
+                  onMouseLeave={(e) =>
+                    (e.currentTarget.style.color = "rgba(255,255,255,0.32)")
+                  }
+                >
+                  <svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M1.5 1.5l13 6.5-13 6.5v-5l9-1.5-9-1.5v-5z" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Hint — only while idle and input empty */}
+          {canInput && !loading && !input && (
+            <p
+              style={{
+                textAlign: "center",
+                color: "rgba(255,255,255,0.16)",
+                fontSize: "0.68rem",
+                letterSpacing: "0.13em",
+                textTransform: "uppercase",
+                marginTop: "10px",
+              }}
+            >
+              enter to reply
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
