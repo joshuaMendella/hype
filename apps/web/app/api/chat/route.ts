@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextRequest, NextResponse, after } from "next/server"
 import Groq from "groq-sdk"
 import { createClient } from "@/lib/supabase/server"
+import { extractFacts } from "@/lib/ai/extract"
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
@@ -51,11 +52,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid messages" }, { status: 400 })
   }
 
+  const { data: vaultNotes } = await supabase
+    .from("vault_notes")
+    .select("title, topic, content_md")
+    .eq("user_id", user.id)
+    .order("updated_at", { ascending: false })
+    .limit(20)
+
+  const vaultContext = vaultNotes
+    ?.filter((n) => n.content_md?.trim())
+    .map((n) => `### ${n.topic ? `[${n.topic}] ` : ""}${n.title}\n${n.content_md}`)
+    .join("\n\n") ?? ""
+
+  const systemPrompt = vaultContext
+    ? `${SYSTEM_PROMPT}\n\n## What you already know about this person:\n${vaultContext}`
+    : SYSTEM_PROMPT
+
   const response = await groq.chat.completions.create({
     model: "llama-3.3-70b-versatile",
     max_tokens: 150,
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: systemPrompt },
       ...messages.map((m) => ({ role: m.role, content: m.content })),
     ],
   })
@@ -92,6 +109,11 @@ export async function POST(req: NextRequest) {
       { conversation_id: conversationId, role: "user", content: lastUserMsg.content },
       { conversation_id: conversationId, role: "assistant", content: reply },
     ])
+    after(() =>
+      extractFacts(conversationId, messages, user.id).catch((err) =>
+        console.error("[chat] extraction failed:", err)
+      )
+    )
   }
 
   return NextResponse.json({ reply })

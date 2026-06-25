@@ -10,11 +10,12 @@ export default async function GraphPage() {
 
   if (!user) redirect("/login")
 
-  // Fetch vault nodes and edges for this user
   const [{ data: notes }, { data: links }] = await Promise.all([
     supabase.from("vault_notes").select("id, title, topic, path, content_md"),
     supabase.from("vault_links").select("id, source_note_id, target_note_id, anchor_text"),
   ])
+
+  const userName: string | null = user.user_metadata?.display_name ?? null
 
   const graphData: GraphData = {
     nodes: (notes ?? []).map((n) => ({
@@ -35,10 +36,10 @@ export default async function GraphPage() {
   return (
     <div className="h-screen w-screen overflow-hidden relative">
       {/* Full-screen graph */}
-      <GraphCanvas data={graphData} />
+      <GraphCanvas initialData={graphData} />
 
       {/* AI chat panel — overlays the bottom-right of the graph */}
-      <ChatPanel userId={user.id} />
+      <ChatPanel userId={user.id} userName={userName} />
     </div>
   )
 }

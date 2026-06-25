@@ -7,8 +7,10 @@ interface ChatMessage {
   content: string
 }
 
-const OPENING =
-  "Hey — I'm here to get to know you a little. What's something you've been genuinely into lately?"
+function opening(name: string | null) {
+  const greeting = name ? `Hey ${name[0].toUpperCase() + name.slice(1)}` : "Hey"
+  return `${greeting} — what have you been up to today?`
+}
 
 // ponytail: word-by-word reveal via recursive setTimeout, no animation lib
 function useTypewriter(text: string, speed = 52) {
@@ -36,9 +38,9 @@ function useTypewriter(text: string, speed = 52) {
   return { displayed, done }
 }
 
-export default function ChatPanel({ userId }: { userId: string }) {
+export default function ChatPanel({ userId, userName }: { userId: string; userName: string | null }) {
   const [history, setHistory] = useState<ChatMessage[]>([])
-  const [currentAi, setCurrentAi] = useState(OPENING)
+  const [currentAi, setCurrentAi] = useState(() => opening(userName))
   const [aiVisible, setAiVisible] = useState(true)
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
