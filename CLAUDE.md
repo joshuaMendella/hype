@@ -23,7 +23,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - RLS enabled on all tables — users can only access their own data
 - Three Supabase clients: `lib/supabase/client.ts` (browser), `lib/supabase/server.ts` (SSR), `lib/supabase/admin.ts` (server-only, bypasses RLS)
 
-## What's been built (as of 2026-06-24)
+## What's been built (as of 2026-06-25)
 - [x] Monorepo scaffold (Turborepo, pnpm, TypeScript)
 - [x] Next.js app scaffolded in apps/web
 - [x] Supabase schema: profiles, vault_notes, vault_links, conversations, messages, extractions
@@ -33,7 +33,10 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - [x] Graph page (/graph) — full-screen D3 force graph + conversational UI overlay
 - [x] GraphCanvas component — Obsidian-style, topic colors, zoom/pan/drag, tooltips
 - [x] ChatPanel component — full-screen conversational UI (AI top-center, input bottom-center, typewriter reveal, Poppins font)
-- [x] /api/chat — Groq Llama 3.3 70B interviewer, persists messages to DB, tuned system prompt
+- [x] /api/chat — Groq Llama 3.3 70B interviewer, persists messages to DB, vault context injection, tuned system prompt
+- [x] lib/ai/extract.ts — Groq extraction pipeline: atomic fact nodes, dedup via existing title injection, writes vault_notes + vault_links via admin client
+- [x] Graph auto-updates — 8s polling (postgres_changes unusable: SSR cookie sessions don't auth the realtime WebSocket)
+- [x] Supabase Realtime migrations — supabase_realtime publication + REPLICA IDENTITY FULL on vault_notes/vault_links
 
 ## Claude Code plugins installed (user-scoped, active next session)
 - `context-mode` — keeps large outputs out of context window (was pre-installed)
@@ -47,12 +50,8 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 3. GROQ_API_KEY is already in apps/web/.env.local — chat is working
 
 ## What's NOT done yet (next steps in order)
-1. Vault context injection — pull user's vault notes into system prompt so AI remembers across sessions
-2. Extraction pipeline — after conversation, extract facts → write vault notes → update graph in real time
-3. Vault API route — POST /api/vault to create/update notes and links
-4. Real-time graph updates — Supabase Realtime subscription in GraphCanvas
-5. Landing page — marketing page at / (currently redirects to /signup)
-6. Vercel deployment
+1. Landing page — marketing page at / (currently redirects to /signup)
+2. Vercel deployment
 
 ## Common commands
 ```bash
@@ -97,8 +96,7 @@ apps/web/
 │   ├── supabase/client.ts       ← browser client
 │   ├── supabase/server.ts       ← SSR client
 │   ├── supabase/admin.ts        ← service role (server-only)
-│   ├── ai/                      ← not built yet
-│   └── vault/                   ← not built yet
+│   └── ai/extract.ts            ← Groq fact extraction pipeline
 ├── types/database.ts            ← all TypeScript types
 └── supabase/schema.sql          ← full DB schema
 ```
