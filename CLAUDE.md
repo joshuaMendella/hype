@@ -3,6 +3,15 @@
 ## What this project is
 AI-powered personal knowledge graph. An AI interviewer learns about the user over time and builds an Obsidian-compatible vault of markdown notes. The graph visualization IS the home screen — users watch their knowledge graph grow as they talk to the AI.
 
+## Business model (session 4 decision)
+**Free to users. Revenue from consent-based conversational advertising.**
+- The data contract is transparent and front-and-center at onboarding: the interview builds a personal profile, that profile powers tailored offers, the user controls what they see and when
+- When the vault detects a relevant intent (e.g. user wants a shirt), the interviewer offers to surface current deals — user says yes or no, nothing is forced
+- Advertisers pay CPC ($1.50–3.00) or CPA (8–12% of transaction) for verified, consent-confirmed referrals
+- Day-one revenue: affiliate links (Amazon Associates, Ticketmaster, Booking.com) — no advertiser relationships needed
+- Slogan: "Be in control of your ads. Only see what you want, when you want it."
+- Full analysis: `HYPE_BUSINESS_ASSESSMENT.md` in repo root
+
 ## Repo
 - GitHub: https://github.com/joshuaMendella/hype
 - Local: C:\Users\mende\desktop\hype
@@ -23,7 +32,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - RLS enabled on all tables — users can only access their own data
 - Three Supabase clients: `lib/supabase/client.ts` (browser), `lib/supabase/server.ts` (SSR), `lib/supabase/admin.ts` (server-only, bypasses RLS)
 
-## What's been built (as of 2026-06-26)
+## What's been built (as of 2026-06-26, updated session 4)
 - [x] Monorepo scaffold (Turborepo, pnpm, TypeScript)
 - [x] Next.js app scaffolded in apps/web
 - [x] Supabase schema: profiles, vault_notes, vault_links, conversations, messages, extractions
@@ -42,6 +51,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - [x] Graph updates — event-driven (fires once 4s after each chat reply, not on a polling interval)
 - [x] Supabase: reset_vault(user_id) function — idempotent vault wipe, always re-seeds "You" root node at path _profile.md
 - [x] Supabase: scheduled_for date column on vault_notes + partial index for today's event queries
+- [x] HYPE_BUSINESS_ASSESSMENT.md — 5-page business memo: market size, competitors, differentiation, consent-based ad model, unit economics, risks, next steps
 
 ## Claude Code plugins installed (user-scoped, active next session)
 - `context-mode` — keeps large outputs out of context window (was pre-installed)
@@ -55,6 +65,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 3. GROQ_API_KEY is already in apps/web/.env.local — chat is working
 4. To reset vault for testing: `SELECT reset_vault('09158791-8006-453c-b176-98253e3ff1d8');` via Supabase MCP or SQL editor
 5. Root "You" node is always at path `_profile.md`, topic `Profile` — extraction depends on this
+6. `.mcp.json` is gitignored — Supabase MCP needs `SUPABASE_ACCESS_TOKEN` set locally in the file (not committed)
 
 ## Key extraction rules (session 3 decisions)
 - 5-layer graph: You → Topic hub → Category hub → Fact → Attribute nodes
@@ -72,8 +83,11 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - Known-facts list injected into system prompt to prevent re-asking already-captured information
 
 ## What's NOT done yet (next steps in order)
-1. Landing page — marketing page at / (currently redirects to /signup)
+1. Landing page — marketing page at / (currently redirects to /signup); lead with "Be in control of your ads" + "Build your personal graph"
 2. Vercel deployment
+3. Affiliate link integration — Amazon Associates, Ticketmaster, Booking.com (Day 1 ad revenue, no advertiser deals needed)
+4. Ad moment UI — sponsored offer card inside ChatPanel, clearly labeled, triggered only after user says yes
+5. Mobile app (Expo) — only after web is live and validated
 
 ## Common commands
 ```bash
@@ -89,6 +103,7 @@ pnpm dev  # runs all apps via turbo
 
 ## Security rules (never break these)
 - `.env.local` is gitignored — NEVER commit it
+- `.mcp.json` is gitignored — NEVER commit it (contains Supabase PAT)
 - `SUPABASE_SERVICE_ROLE_KEY` has no `NEXT_PUBLIC_` prefix — server-only
 - `ANTHROPIC_API_KEY` has no `NEXT_PUBLIC_` prefix — server-only
 - Admin client (`lib/supabase/admin.ts`) must only be imported in `app/api/` routes
