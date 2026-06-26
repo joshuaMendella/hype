@@ -1,12 +1,4 @@
-export type Topic =
-  | "Profile"
-  | "Work"
-  | "Style"
-  | "Food"
-  | "Fitness"
-  | "People"
-  | "Goals"
-  | "Insights"
+export type { Topic } from "@/lib/ai/topics"
 
 export type NoteSource = "conversation" | "inferred" | "user-confirmed" | "system"
 
@@ -28,6 +20,7 @@ export interface VaultNote {
   topic: Topic | null
   content_md: string
   confidence: number
+  intent: boolean
   source: NoteSource
   created_at: string
   updated_at: string
@@ -71,6 +64,7 @@ export interface GraphNode {
   title: string
   topic: Topic | null
   path: string
+  intent: boolean
   wordCount: number
   x?: number
   y?: number

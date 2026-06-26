@@ -38,7 +38,7 @@ function useTypewriter(text: string, speed = 52) {
   return { displayed, done }
 }
 
-export default function ChatPanel({ userId, userName }: { userId: string; userName: string | null }) {
+export default function ChatPanel({ userId, userName, onReply }: { userId: string; userName: string | null; onReply?: () => void }) {
   const [history, setHistory] = useState<ChatMessage[]>([])
   const [currentAi, setCurrentAi] = useState(() => opening(userName))
   const [aiVisible, setAiVisible] = useState(true)
@@ -50,11 +50,12 @@ export default function ChatPanel({ userId, userName }: { userId: string; userNa
   const { displayed, done } = useTypewriter(currentAi)
 
   useEffect(() => {
-    if (done) {
-      setCanInput(true)
-      inputRef.current?.focus()
-    }
+    if (done) setCanInput(true)
   }, [done])
+
+  useEffect(() => {
+    if (canInput) inputRef.current?.focus()
+  }, [canInput])
 
   const send = useCallback(async () => {
     const text = input.trim()
@@ -81,6 +82,7 @@ export default function ChatPanel({ userId, userName }: { userId: string; userNa
       if (!res.ok) throw new Error()
       const { reply } = await res.json()
       setCurrentAi(reply)
+      onReply?.()
     } catch {
       setCurrentAi("Something slipped on my end — want to try that again?")
     } finally {

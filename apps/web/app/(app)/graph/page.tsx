@@ -1,7 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { redirect } from "next/navigation"
-import GraphCanvas from "@/components/graph/GraphCanvas"
-import ChatPanel from "@/components/chat/ChatPanel"
+import GraphWrapper from "@/components/graph/GraphWrapper"
 import type { GraphData } from "@/types/database"
 
 export default async function GraphPage() {
@@ -35,11 +34,7 @@ export default async function GraphPage() {
 
   return (
     <div className="h-screen w-screen overflow-hidden relative">
-      {/* Full-screen graph */}
-      <GraphCanvas initialData={graphData} />
-
-      {/* AI chat panel — overlays the bottom-right of the graph */}
-      <ChatPanel userId={user.id} userName={userName} />
+      <GraphWrapper initialData={graphData} userId={user.id} userName={userName} />
     </div>
   )
 }

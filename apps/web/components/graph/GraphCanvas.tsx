@@ -39,9 +39,10 @@ function noteToNode(note: VaultNote): GraphNode {
 
 interface Props {
   initialData: GraphData
+  refreshTrigger?: number
 }
 
-export default function GraphCanvas({ initialData }: Props) {
+export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
   const zoomTransformRef = useRef<d3.ZoomTransform | null>(null)
@@ -193,7 +194,7 @@ export default function GraphCanvas({ initialData }: Props) {
       simulation.on("end", () => {
         const bounds = (g.node() as SVGGElement).getBBox()
         if (!bounds.width || !bounds.height) return
-        const scale = 0.85 / Math.max(bounds.width / width, bounds.height / height)
+        const scale = Math.min(0.85 / Math.max(bounds.width / width, bounds.height / height), 1.5)
         const tx = (width - scale * (bounds.x * 2 + bounds.width)) / 2
         const ty = (height - scale * (bounds.y * 2 + bounds.height)) / 2
         svg.transition().duration(600).call(
@@ -211,10 +212,12 @@ export default function GraphCanvas({ initialData }: Props) {
     return () => observer.disconnect()
   }, [draw])
 
-  // Poll for new nodes every 8s — SSR cookie-based sessions don't work with postgres_changes realtime
+  // Refresh graph after each chat reply — triggered by parent via refreshTrigger
   useEffect(() => {
+    if (!refreshTrigger) return
     const supabase = createClient()
-    const id = setInterval(async () => {
+    // ponytail: small delay so extraction (fire-and-forget after()) has time to write
+    const id = setTimeout(async () => {
       const [{ data: notes }, { data: links }] = await Promise.all([
         supabase.from("vault_notes").select("id, title, topic, path, content_md"),
         supabase.from("vault_links").select("id, source_note_id, target_note_id, anchor_text"),
@@ -229,9 +232,9 @@ export default function GraphCanvas({ initialData }: Props) {
           anchor_text: l.anchor_text,
         })),
       })
-    }, 8000)
-    return () => clearInterval(id)
-  }, [])
+    }, 4000)
+    return () => clearTimeout(id)
+  }, [refreshTrigger])
 
   return (
     <>

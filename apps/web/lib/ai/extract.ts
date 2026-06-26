@@ -1,26 +1,64 @@
 import Groq from "groq-sdk"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { TOPICS } from "./topics"
+import { TOPIC_CATEGORIES } from "./categories"
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
 type Message = { role: string; content: string }
-type Fact = { title: string; topic: string; content_md: string }
+type Attribute = { title: string; content_md: string }
+type Fact = { title: string; topic: string; category: string; content_md: string; intent: boolean; scheduled_for: string | null; attributes: Attribute[] }
 
-function buildPrompt(existingTitles: string[]) {
+function buildPrompt(existingTitles: string[], today: string) {
   const known = existingTitles.length
     ? `\n\nAlready captured (do NOT recreate these — only extract NEW, more specific facts not yet in this list):\n${existingTitles.map((t) => `- ${t}`).join("\n")}`
     : ""
-  return `You extract atomic facts about a person from conversation excerpts.
 
-Return JSON exactly: {"facts": [{"title": "3-6 word specific title", "topic": "one of: Profile|Work|Style|Food|Fitness|People|Goals|Insights", "content_md": "one sentence fact"}]}
+  const categoryLines = Object.entries(TOPIC_CATEGORIES)
+    .map(([topic, cats]) => `  ${topic}: ${cats.join(" | ")}`)
+    .join("\n")
+
+  return `You extract atomic facts about a person from conversation excerpts.
+Today's date: ${today}
+
+Return JSON exactly: {"facts": [{"title": "3-6 word specific title", "topic": "one of: ${TOPICS.join("|")}", "category": "see list below", "content_md": "one sentence fact", "intent": false, "scheduled_for": null, "attributes": []}]}
+
+category: assign each fact to one category from its topic's list:
+${categoryLines}
+
+Set intent: true when the person expresses desire or active consideration to buy, get, or do something.
+
+scheduled_for: set to an ISO date string (YYYY-MM-DD) when the fact involves something happening on a specific future date — a meeting, trip, appointment, event, dinner, concert, etc. Resolve relative dates ("tomorrow", "Friday", "next week") using today's date above. Set null if no specific date is mentioned.
+
+attributes: when a fact is a concrete entity, list its known properties as {"title": "Property: Value", "content_md": "one sentence"}. Examples:
+- Purchase → Color: Blue, Size: M, Store: Zara, Price: €29 (price ONLY if explicitly stated)
+- Place visited → Type: Restaurant, Area: Soho, With: Partner
+- Person mentioned → Relationship: Brother, Context: Lives in NYC
+- Event attended → Venue: Madison Square Garden, With: Friends
+Leave attributes as [] for simple preference or habit facts.
 
 Rules:
-- Each fact must be atomic — one specific detail per node (e.g. "Prefers Loafers" is separate from "Shopping for Shoes")
+- Each fact must be atomic — one specific detail per node
 - Only extract what the person explicitly stated
 - Skip greetings, questions, filler, and vague answers
-- Titles must be specific: "Prefers Loafers" not "Shoe Preference", "Drinks Oat Milk Lattes" not "Coffee Habits"
-- If the person adds detail to something already known, extract ONLY the new specific detail as its own fact
-- Return {"facts": []} if nothing new or concrete was shared${known}`
+- Titles must be specific: "Prefers Loafers" not "Shoe Preference"
+- Return {"facts": []} if nothing new or concrete was shared
+
+Durability rule — only extract facts that reveal something lasting about who this person is. Valid categories:
+1. Ownership: something they have ("Owns Brown Polo Shirt from Zara")
+2. Preference: something they like or habitually choose ("Prefers Iced Americano", "Shops at Zara")
+3. Intent: something they want or plan to get/do ("Wants Semi-Formal Grey Trousers")
+4. Routine: something they do regularly ("Goes to Starbucks 3-4x Per Week")
+
+One-time activities are NOT facts — skip "went shopping", "had a coffee", "watched a movie", "worked all day", and any similar event unless it produced an ownership, preference, intent, or routine fact. The activity is context, not the fact itself.
+
+No inference rule — never derive a fact from implication. Only extract what the person explicitly stated. Examples of forbidden inference:
+- "worked half day" → do NOT extract anything about employment type. Half day ≠ part-time.
+- "went out shopping" → do NOT extract "shops regularly". One trip ≠ a habit.
+- "had a coffee" → do NOT extract "drinks coffee daily". One mention ≠ a routine.
+If the information needed to make a fact true was not explicitly stated, skip it entirely.
+
+No pattern from a single instance — routine and habit facts require the user to explicitly state frequency or regularity ("every day", "3-4 times a week", "I always", "usually"). A single mention of an activity is never evidence of a pattern.${known}`
 }
 
 export async function extractFacts(
@@ -38,6 +76,7 @@ export async function extractFacts(
 
   const existingTitles = (existing ?? []).map((n) => n.title)
 
+  const today = new Date().toISOString().split("T")[0]
   const transcript = messages
     .slice(-6)
     .map((m) => `${m.role}: ${m.content}`)
@@ -47,10 +86,10 @@ export async function extractFacts(
   try {
     const res = await groq.chat.completions.create({
       model: "llama-3.3-70b-versatile",
-      max_tokens: 400,
+      max_tokens: 600,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: buildPrompt(existingTitles) },
+        { role: "system", content: buildPrompt(existingTitles, today) },
         { role: "user", content: transcript },
       ],
     })
@@ -76,29 +115,15 @@ export async function extractFacts(
   }
 
   for (const fact of facts) {
-    const slug = fact.title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-    const factPath = `${fact.topic.toLowerCase()}/${slug}.md`
-    const topicPath = `${fact.topic.toLowerCase()}/index.md`
+    const toSlug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
+    const topicDir = toSlug(fact.topic)
+    const catSlug = toSlug(fact.category)
+    const factSlug = toSlug(fact.title)
+    const topicPath = `${topicDir}/index.md`
+    const catPath = `${topicDir}/${catSlug}/index.md`
+    const factPath = `${topicDir}/${catSlug}/${factSlug}.md`
 
-    // Upsert fact note
-    const { data: factNote, error: factErr } = await supabase
-      .from("vault_notes")
-      .upsert(
-        { user_id: userId, path: factPath, title: fact.title, topic: fact.topic, content_md: fact.content_md, source: "conversation", confidence: 0.8 },
-        { onConflict: "user_id,path" }
-      )
-      .select("id")
-      .single()
-
-    if (factErr || !factNote) {
-      console.error("[extract] fact upsert failed:", factErr)
-      continue
-    }
-
-    // Upsert topic hub node (e.g. "Food", "Work")
+    // Upsert topic hub (layer 2)
     const { data: topicHub, error: topicErr } = await supabase
       .from("vault_notes")
       .upsert(
@@ -113,28 +138,73 @@ export async function extractFacts(
       continue
     }
 
-    // Link: You → Topic hub
-    const { error: l1Err } = await supabase
-      .from("vault_links")
+    // Upsert category hub (layer 3)
+    const { data: catHub, error: catErr } = await supabase
+      .from("vault_notes")
       .upsert(
-        { user_id: userId, source_note_id: rootNote.id, target_note_id: topicHub.id },
+        { user_id: userId, path: catPath, title: fact.category, topic: fact.topic, content_md: "", source: "system", confidence: 1 },
+        { onConflict: "user_id,path" }
+      )
+      .select("id")
+      .single()
+
+    if (catErr || !catHub) {
+      console.error("[extract] category hub upsert failed:", catErr)
+      continue
+    }
+
+    // Upsert fact note (layer 4)
+    const { data: factNote, error: factErr } = await supabase
+      .from("vault_notes")
+      .upsert(
+        { user_id: userId, path: factPath, title: fact.title, topic: fact.topic, content_md: fact.content_md, intent: fact.intent ?? false, scheduled_for: fact.scheduled_for ?? null, source: "conversation", confidence: 0.8 },
+        { onConflict: "user_id,path" }
+      )
+      .select("id")
+      .single()
+
+    if (factErr || !factNote) {
+      console.error("[extract] fact upsert failed:", factErr)
+      continue
+    }
+
+    // Links: You → Topic → Category → Fact
+    await supabase.from("vault_links").upsert(
+      { user_id: userId, source_note_id: rootNote.id, target_note_id: topicHub.id },
+      { onConflict: "source_note_id,target_note_id" }
+    )
+    await supabase.from("vault_links").upsert(
+      { user_id: userId, source_note_id: topicHub.id, target_note_id: catHub.id },
+      { onConflict: "source_note_id,target_note_id" }
+    )
+    await supabase.from("vault_links").upsert(
+      { user_id: userId, source_note_id: catHub.id, target_note_id: factNote.id },
+      { onConflict: "source_note_id,target_note_id" }
+    )
+
+    // Attribute nodes (layer 5)
+    for (const attr of fact.attributes ?? []) {
+      const attrPath = `${topicDir}/${catSlug}/${factSlug}/${toSlug(attr.title)}.md`
+      const { data: attrNote, error: attrErr } = await supabase
+        .from("vault_notes")
+        .upsert(
+          { user_id: userId, path: attrPath, title: attr.title, topic: fact.topic, content_md: attr.content_md, intent: false, source: "conversation", confidence: 0.8 },
+          { onConflict: "user_id,path" }
+        )
+        .select("id")
+        .single()
+
+      if (attrErr || !attrNote) {
+        console.error("[extract] attribute upsert failed:", attrErr)
+        continue
+      }
+
+      await supabase.from("vault_links").upsert(
+        { user_id: userId, source_note_id: factNote.id, target_note_id: attrNote.id },
         { onConflict: "source_note_id,target_note_id" }
       )
-    if (l1Err) console.error("[extract] You→Topic link failed:", l1Err)
+    }
 
-    // Link: Topic hub → Fact
-    const { error: l2Err } = await supabase
-      .from("vault_links")
-      .upsert(
-        { user_id: userId, source_note_id: topicHub.id, target_note_id: factNote.id },
-        { onConflict: "source_note_id,target_note_id" }
-      )
-    if (l2Err) console.error("[extract] Topic→Fact link failed:", l2Err)
-
-    // Audit trail
-    const { error: extErr } = await supabase
-      .from("extractions")
-      .insert({ conversation_id: conversationId, note_id: factNote.id })
-    if (extErr) console.error("[extract] extractions insert failed:", extErr)
+    await supabase.from("extractions").insert({ conversation_id: conversationId, note_id: factNote.id })
   }
 }

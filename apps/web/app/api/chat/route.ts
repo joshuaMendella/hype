@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server"
 import Groq from "groq-sdk"
 import { createClient } from "@/lib/supabase/server"
 import { extractFacts } from "@/lib/ai/extract"
+import { TOPICS } from "@/lib/ai/topics"
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
@@ -23,17 +24,32 @@ Tone examples:
 - Multiple questions in one message ✗
 - Slang or overly casual expressions ✗
 
-Start conversations with a broad open question about their day or recent activities, then drill down naturally on whatever they share.
+Opening a conversation:
+- Default: ask an open-ended question about their day or recent activities. e.g. "What were you up to today?" or "Did anything interesting happen today?"
+- If you know they had a scheduled event that has already taken place, open with that instead.
+- If a past conversation thread is still relevant and has more to explore, pick it back up naturally.
+
+Drill-down principle:
+When the user mentions a specific thing — a purchase, a place visited, a person, an event — treat it as an entity to understand fully. Ask about its key attributes ONE AT A TIME, in order, before moving on. Follow these sequences strictly:
+- Purchase (clothing): where they got it → color/style → size → price (only if they bring it up)
+- Purchase (beauty/skincare): brand name → what it is → how they use it
+- Purchase (tech): brand/model → where from → price (only if they offer)
+- Place visited: which place → what for → with whom → how it was
+- Person mentioned: who they are → relationship to the user → context of mention
+- Event: what kind → where → with whom → highlights
+
+Brand rule: if the user mentions "the brand" or "a brand" without naming it, always ask which brand before moving on. Never let a brand reference go unnamed.
+
+Never ask about price first. Never ask two attributes at once. Never ask "do you have plans to wear it?" or "do you have a special occasion in mind?" — these yield nothing useful. If they give a short answer on one attribute, accept it and move to the next. Finish the entity's attributes before exploring anything else the user mentioned.
+
+During the conversation:
+- If a topic stops producing useful information — short replies, repetition, or clear disinterest — pivot to something new without calling attention to the switch.
+- Never push for more than the user is willing to share. If they give a short answer and don't expand, accept it and move on.
+- If the user seems disengaged — cold answers, single-word replies, low energy — end the session gently. Say something like "That was a lot for today — let's pick it up tomorrow." Don't press further.
+- If the user deflects a topic (e.g. "adult stuff", "personal", "rather not say"), accept it and pivot to a completely unrelated subject. Never ask a follow-up question about the deflected topic.
 
 Topics to explore over time — don't rush, one session covers one thread:
-- Daily activities and routines
-- Food, restaurants, cooking
-- Shopping habits and preferences
-- Exercise and health
-- Work and projects
-- People in their life
-- Hobbies and interests
-- Goals and plans`
+${TOPICS.map((t) => `- ${t}`).join("\n")}`
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -52,21 +68,43 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid messages" }, { status: 400 })
   }
 
-  const { data: vaultNotes } = await supabase
-    .from("vault_notes")
-    .select("title, topic, content_md")
-    .eq("user_id", user.id)
-    .order("updated_at", { ascending: false })
-    .limit(20)
+  const today = new Date().toISOString().split("T")[0]
+
+  const [{ data: vaultNotes }, { data: todayEvents }] = await Promise.all([
+    supabase
+      .from("vault_notes")
+      .select("title, topic, content_md")
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false })
+      .limit(20),
+    supabase
+      .from("vault_notes")
+      .select("title, topic, content_md")
+      .eq("user_id", user.id)
+      .eq("scheduled_for", today),
+  ])
 
   const vaultContext = vaultNotes
     ?.filter((n) => n.content_md?.trim())
     .map((n) => `### ${n.topic ? `[${n.topic}] ` : ""}${n.title}\n${n.content_md}`)
     .join("\n\n") ?? ""
 
-  const systemPrompt = vaultContext
-    ? `${SYSTEM_PROMPT}\n\n## What you already know about this person:\n${vaultContext}`
-    : SYSTEM_PROMPT
+  // Remind the AI of known facts so it doesn't re-ask things already captured
+  const knownFacts = vaultNotes
+    ?.filter((n) => n.content_md?.trim())
+    .map((n) => `- ${n.title}`)
+    .join("\n") ?? ""
+
+  const todayContext = todayEvents?.length
+    ? `\n\n## Scheduled for today:\n${todayEvents.map((e) => `- ${e.title}${e.topic ? ` (${e.topic})` : ""}`).join("\n")}\nOpen the conversation by asking about one of these — either how it went (if it likely already happened) or wishing them well (if upcoming). Skip the default opening question.`
+    : ""
+
+  const systemPrompt = [
+    SYSTEM_PROMPT,
+    vaultContext ? `## What you already know about this person:\n${vaultContext}` : "",
+    knownFacts ? `## Facts already captured — do NOT re-ask about these:\n${knownFacts}` : "",
+    todayContext,
+  ].filter(Boolean).join("\n\n")
 
   const response = await groq.chat.completions.create({
     model: "llama-3.3-70b-versatile",
