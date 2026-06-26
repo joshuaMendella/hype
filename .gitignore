@@ -20,6 +20,9 @@ Thumbs.db
 .vscode/settings.json
 .idea
 
+# Local MCP config (contains secrets)
+.mcp.json
+
 # Logs
 *.log
 npm-debug.log*
