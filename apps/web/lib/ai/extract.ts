@@ -7,7 +7,7 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
 type Message = { role: string; content: string }
 type Attribute = { title: string; content_md: string }
-type Fact = { title: string; topic: string; category: string; content_md: string; intent: boolean; scheduled_for: string | null; attributes: Attribute[] }
+type Fact = { title: string; topic: string; category: string; content_md: string; intent: boolean; scheduled_for: string | null; brand: string | null; attributes: Attribute[] }
 
 function buildPrompt(existingTitles: string[], today: string) {
   const known = existingTitles.length
@@ -21,21 +21,22 @@ function buildPrompt(existingTitles: string[], today: string) {
   return `You extract atomic facts about a person from conversation excerpts.
 Today's date: ${today}
 
-Return JSON exactly: {"facts": [{"title": "3-6 word specific title", "topic": "one of: ${TOPICS.join("|")}", "category": "see list below", "content_md": "one sentence fact", "intent": false, "scheduled_for": null, "attributes": []}]}
+Return JSON exactly: {"facts": [{"title": "3-6 word specific title", "topic": "one of: ${TOPICS.join("|")}", "category": "see list below", "content_md": "one sentence fact", "intent": false, "scheduled_for": null, "brand": null, "attributes": []}]}
 
-category: assign each fact to one category from its topic's list:
+category: MUST be exactly one from the topic's list below — never invent a new category name.
 ${categoryLines}
+
+brand: when a fact involves a specific named brand or company (a purchase, an owned item, a brand preference), set to the exact brand name (e.g. "The Ordinary", "Zara", "Apple"). Null otherwise.
 
 Set intent: true when the person expresses desire or active consideration to buy, get, or do something.
 
 scheduled_for: set to an ISO date string (YYYY-MM-DD) when the fact involves something happening on a specific future date — a meeting, trip, appointment, event, dinner, concert, etc. Resolve relative dates ("tomorrow", "Friday", "next week") using today's date above. Set null if no specific date is mentioned.
 
-attributes: when a fact is a concrete entity, list its known properties as {"title": "Property: Value", "content_md": "one sentence"}. Examples:
-- Purchase → Color: Blue, Size: M, Store: Zara, Price: €29 (price ONLY if explicitly stated)
-- Place visited → Type: Restaurant, Area: Soho, With: Partner
-- Person mentioned → Relationship: Brother, Context: Lives in NYC
-- Event attended → Venue: Madison Square Garden, With: Friends
-Leave attributes as [] for simple preference or habit facts.
+attributes: for concrete facts, list known properties as {"title": "Property", "content_md": "value"}. The brand goes in the brand field, not here. Examples:
+- Purchase → Color: Blue, Size: M, Price: €29 (price ONLY if explicitly stated)
+- Place → Area: Soho, With: Partner
+- Event → Venue: Madison Square Garden, With: Friends
+Leave attributes as [] for simple preferences or habits.
 
 Rules:
 - Each fact must be atomic — one specific detail per node
@@ -153,11 +154,15 @@ export async function extractFacts(
       continue
     }
 
+    // Serialize attributes into fact content_md (not graph nodes)
+    const attrLines = (fact.attributes ?? []).map((a) => `- **${a.title}**: ${a.content_md}`)
+    const fullContent = attrLines.length ? `${fact.content_md}\n\n${attrLines.join("\n")}` : fact.content_md
+
     // Upsert fact note (layer 4)
     const { data: factNote, error: factErr } = await supabase
       .from("vault_notes")
       .upsert(
-        { user_id: userId, path: factPath, title: fact.title, topic: fact.topic, content_md: fact.content_md, intent: fact.intent ?? false, scheduled_for: fact.scheduled_for ?? null, source: "conversation", confidence: 0.8 },
+        { user_id: userId, path: factPath, title: fact.title, topic: fact.topic, content_md: fullContent, intent: fact.intent ?? false, scheduled_for: fact.scheduled_for ?? null, source: "conversation", confidence: 0.8 },
         { onConflict: "user_id,path" }
       )
       .select("id")
@@ -182,27 +187,45 @@ export async function extractFacts(
       { onConflict: "source_note_id,target_note_id" }
     )
 
-    // Attribute nodes (layer 5)
-    for (const attr of fact.attributes ?? []) {
-      const attrPath = `${topicDir}/${catSlug}/${factSlug}/${toSlug(attr.title)}.md`
-      const { data: attrNote, error: attrErr } = await supabase
+    // Brand node + cross-link (fact → brand, separate from category tree)
+    if (fact.brand) {
+      const brandSlug = toSlug(fact.brand)
+      const brandsCatPath = `${topicDir}/brands/index.md`
+      const brandPath = `${topicDir}/brands/${brandSlug}.md`
+
+      const { data: brandsCatHub } = await supabase
         .from("vault_notes")
         .upsert(
-          { user_id: userId, path: attrPath, title: attr.title, topic: fact.topic, content_md: attr.content_md, intent: false, source: "conversation", confidence: 0.8 },
+          { user_id: userId, path: brandsCatPath, title: "Brands", topic: fact.topic, content_md: "", source: "system", confidence: 1 },
           { onConflict: "user_id,path" }
         )
         .select("id")
         .single()
 
-      if (attrErr || !attrNote) {
-        console.error("[extract] attribute upsert failed:", attrErr)
-        continue
-      }
+      const { data: brandNote } = await supabase
+        .from("vault_notes")
+        .upsert(
+          { user_id: userId, path: brandPath, title: fact.brand, topic: fact.topic, content_md: "", source: "system", confidence: 1 },
+          { onConflict: "user_id,path" }
+        )
+        .select("id")
+        .single()
 
-      await supabase.from("vault_links").upsert(
-        { user_id: userId, source_note_id: factNote.id, target_note_id: attrNote.id },
-        { onConflict: "source_note_id,target_note_id" }
-      )
+      if (brandsCatHub && brandNote) {
+        await supabase.from("vault_links").upsert(
+          { user_id: userId, source_note_id: topicHub.id, target_note_id: brandsCatHub.id },
+          { onConflict: "source_note_id,target_note_id" }
+        )
+        await supabase.from("vault_links").upsert(
+          { user_id: userId, source_note_id: brandsCatHub.id, target_note_id: brandNote.id },
+          { onConflict: "source_note_id,target_note_id" }
+        )
+        // Cross-link: fact → brand (specific to general, avoids cycle in main tree)
+        await supabase.from("vault_links").upsert(
+          { user_id: userId, source_note_id: factNote.id, target_note_id: brandNote.id },
+          { onConflict: "source_note_id,target_note_id" }
+        )
+      }
     }
 
     await supabase.from("extractions").insert({ conversation_id: conversationId, note_id: factNote.id })

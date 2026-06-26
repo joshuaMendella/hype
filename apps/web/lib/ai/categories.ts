@@ -25,7 +25,7 @@ export const TOPIC_CATEGORIES: Record<string, string[]> = {
   Parenting:     ["Children", "School", "Activities", "Priorities"],
   Vehicle:       ["Current", "Shopping For", "Preferences", "Brands"],
   "Real Estate": ["Current Situation", "Plans", "Preferences"],
-  Beauty:        ["Purchases", "Routine", "Wish List", "Brands"],
+  Beauty:        ["Purchases", "Preferences", "Routine", "Wish List", "Brands"],
   Sports:        ["Activities", "Teams", "Equipment", "Events"],
   Events:        ["Attended", "Upcoming", "Wish List"],
   Gaming:        ["Platforms", "Games", "Wish List", "Preferences"],
