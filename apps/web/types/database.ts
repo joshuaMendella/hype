@@ -39,6 +39,7 @@ export interface Conversation {
   id: string
   user_id: string
   status: "active" | "completed"
+  agenda: import("@/lib/ai/checklists").Agenda | null
   created_at: string
   updated_at: string
 }

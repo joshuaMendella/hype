@@ -3,6 +3,7 @@ import Groq from "groq-sdk"
 import { createClient } from "@/lib/supabase/server"
 import { extractFacts } from "@/lib/ai/extract"
 import { TOPICS } from "@/lib/ai/topics"
+import { CHECKLIST_PROMPT, type Agenda } from "@/lib/ai/checklists"
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
 
@@ -30,26 +31,53 @@ Opening a conversation:
 - If a past conversation thread is still relevant and has more to explore, pick it back up naturally.
 
 Drill-down principle:
-When the user mentions a specific thing — a purchase, a place visited, a person, an event — treat it as an entity to understand fully. Ask about its key attributes ONE AT A TIME, in order, before moving on. Follow these sequences strictly:
-- Purchase (clothing): where they got it → color/style → size → price (only if they bring it up)
+When the user mentions a specific thing — a purchase, a place visited, a person, an event — treat it as an entity to understand fully. Ask about its key attributes before moving on. Follow these sequences:
+- Purchase (clothing/accessory): what exactly it is → color + material (ask together) → size → price (only if they bring it up)
 - Purchase (beauty/skincare): brand name → what it is → how they use it
 - Purchase (tech): brand/model → where from → price (only if they offer)
-- Place visited: which place → what for → with whom → how it was
-- Person mentioned: who they are → relationship to the user → context of mention
+- Place visited: which place → what for → with whom → how often
+- Person mentioned: who they are → relationship → context
 - Event: what kind → where → with whom → highlights
 
-Brand rule: if the user mentions "the brand" or "a brand" without naming it, always ask which brand before moving on. Never let a brand reference go unnamed.
+${CHECKLIST_PROMPT}
 
-Never ask about price first. Never ask two attributes at once. Never ask "do you have plans to wear it?" or "do you have a special occasion in mind?" — these yield nothing useful. If they give a short answer on one attribute, accept it and move to the next. Finish the entity's attributes before exploring anything else the user mentioned.
+Brand rule: if the user mentions "the brand" or "a brand" without naming it, always ask which brand before moving on.
+
+Critical attribute rule: always ask for the specific value, never as a yes/no question.
+✓ "What size did you end up getting?"
+✗ "Did you get the right size?" — if the user answers "yes", you still don't know the size. Follow up: "What size was it?"
+If the user's answer doesn't contain a concrete value (just "yes", "it worked", "sure"), ask for the actual value before moving on.
 
 During the conversation:
-- If a topic stops producing useful information — short replies, repetition, or clear disinterest — pivot to something new without calling attention to the switch.
+- If a topic stops producing useful information — short replies, repetition, or clear disinterest — pivot to something new.
 - Never push for more than the user is willing to share. If they give a short answer and don't expand, accept it and move on.
-- If the user seems disengaged — cold answers, single-word replies, low energy — end the session gently. Say something like "That was a lot for today — let's pick it up tomorrow." Don't press further.
-- If the user deflects a topic (e.g. "adult stuff", "personal", "rather not say"), accept it and pivot to a completely unrelated subject. Never ask a follow-up question about the deflected topic.
+- If the user seems disengaged, end the session gently: "That was a lot for today — let's pick it up tomorrow."
+- If the user deflects ("adult stuff", "personal", "rather not say"), accept it and pivot to a completely unrelated subject. Never follow up on the deflected topic.
 
 Topics to explore over time — don't rush, one session covers one thread:
 ${TOPICS.map((t) => `- ${t}`).join("\n")}`
+
+function buildAgendaContext(agenda: Agenda): string {
+  if (!agenda.current) return ""
+
+  const curr = agenda.current
+  const lines = [
+    "## Active agenda — follow this strictly:",
+    "",
+    `CURRENT ENTITY: **${curr.title}** (${curr.topic})`,
+    `Still missing: ${curr.missing.join(", ")}`,
+    `→ Collect these before changing topic. Group related ones naturally where possible.`,
+  ]
+
+  if (agenda.pending.length) {
+    const pendingList = agenda.pending.map((p) => `${p.title} (${p.topic})`).join(", ")
+    lines.push("", `PENDING — pick up after current is complete: ${pendingList}`)
+  }
+
+  lines.push("", "Do not explore unrelated topics until all agenda items are resolved.")
+
+  return lines.join("\n")
+}
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -70,6 +98,31 @@ export async function POST(req: NextRequest) {
 
   const today = new Date().toISOString().split("T")[0]
 
+  // Fetch conversation first (needed for agenda)
+  let conversationId: string
+  let agenda: Agenda = { current: null, pending: [] }
+
+  const { data: existing } = await supabase
+    .from("conversations")
+    .select("id, agenda")
+    .eq("user_id", user.id)
+    .eq("status", "active")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single()
+
+  if (existing) {
+    conversationId = existing.id
+    agenda = (existing.agenda as Agenda) ?? { current: null, pending: [] }
+  } else {
+    const { data: created } = await supabase
+      .from("conversations")
+      .insert({ user_id: user.id })
+      .select("id, agenda")
+      .single()
+    conversationId = created!.id
+  }
+
   const [{ data: vaultNotes }, { data: todayEvents }] = await Promise.all([
     supabase
       .from("vault_notes")
@@ -89,21 +142,21 @@ export async function POST(req: NextRequest) {
     .map((n) => `### ${n.topic ? `[${n.topic}] ` : ""}${n.title}\n${n.content_md}`)
     .join("\n\n") ?? ""
 
-  // Remind the AI of known facts so it doesn't re-ask things already captured
   const knownFacts = vaultNotes
     ?.filter((n) => n.content_md?.trim())
     .map((n) => `- ${n.title}`)
     .join("\n") ?? ""
 
   const todayContext = todayEvents?.length
-    ? `\n\n## Scheduled for today:\n${todayEvents.map((e) => `- ${e.title}${e.topic ? ` (${e.topic})` : ""}`).join("\n")}\nOpen the conversation by asking about one of these — either how it went (if it likely already happened) or wishing them well (if upcoming). Skip the default opening question.`
+    ? `\n\n## Scheduled for today:\n${todayEvents.map((e) => `- ${e.title}${e.topic ? ` (${e.topic})` : ""}`).join("\n")}\nOpen with one of these if it likely already happened, or wish them well if upcoming.`
     : ""
 
   const systemPrompt = [
     SYSTEM_PROMPT,
     vaultContext ? `## What you already know about this person:\n${vaultContext}` : "",
-    knownFacts ? `## Facts already captured — do NOT re-ask about these:\n${knownFacts}` : "",
+    knownFacts ? `## Already captured — do NOT re-ask:\n${knownFacts}` : "",
     todayContext,
+    buildAgendaContext(agenda),
   ].filter(Boolean).join("\n\n")
 
   const response = await groq.chat.completions.create({
@@ -116,30 +169,6 @@ export async function POST(req: NextRequest) {
   })
 
   const reply = response.choices[0]?.message?.content ?? ""
-
-  // Store the last user message and AI reply in Supabase
-  // Find or create active conversation
-  let conversationId: string
-
-  const { data: existing } = await supabase
-    .from("conversations")
-    .select("id")
-    .eq("user_id", user.id)
-    .eq("status", "active")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .single()
-
-  if (existing) {
-    conversationId = existing.id
-  } else {
-    const { data: created } = await supabase
-      .from("conversations")
-      .insert({ user_id: user.id })
-      .select("id")
-      .single()
-    conversationId = created!.id
-  }
 
   const lastUserMsg = messages.findLast((m) => m.role === "user")
   if (lastUserMsg && conversationId) {
