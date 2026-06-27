@@ -32,7 +32,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - RLS enabled on all tables — users can only access their own data
 - Three Supabase clients: `lib/supabase/client.ts` (browser), `lib/supabase/server.ts` (SSR), `lib/supabase/admin.ts` (server-only, bypasses RLS)
 
-## What's been built (as of 2026-06-26, updated session 4)
+## What's been built (as of 2026-06-27, updated session 5)
 - [x] Monorepo scaffold (Turborepo, pnpm, TypeScript)
 - [x] Next.js app scaffolded in apps/web
 - [x] Supabase schema: profiles, vault_notes, vault_links, conversations, messages, extractions
@@ -43,15 +43,16 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - [x] GraphCanvas component — Obsidian-style, topic colors, zoom/pan/drag, tooltips, zoom capped at 1.5x
 - [x] ChatPanel component — full-screen conversational UI (AI top-center, input bottom-center, typewriter reveal, Poppins font)
 - [x] GraphWrapper component — thin client wrapper sharing refreshTrigger state between GraphCanvas and ChatPanel
-- [x] /api/chat — Groq Llama 3.3 70B interviewer, persists messages to DB, vault context injection, known-facts list injection, today's scheduled events injection, drill-down rules, brand rule, deflection handling
-- [x] lib/ai/extract.ts — 5-layer extraction pipeline (You → Topic → Category → Fact → Attributes), scheduled_for support, durability rules, no-inference rules, no-pattern-from-single-instance rules
-- [x] lib/ai/topics.ts — 31 topics (Shopping and Dietary removed/merged)
-- [x] lib/ai/categories.ts — subcategory map for all 31 topics
-- [x] lib/ai/interviewer.md — human-readable interviewer spec (drill-down table, brand rule, deflection handling, scheduled events)
-- [x] Graph updates — event-driven (fires once 4s after each chat reply, not on a polling interval)
-- [x] Supabase: reset_vault(user_id) function — idempotent vault wipe, always re-seeds "You" root node at path _profile.md
+- [x] /api/chat — Groq Llama 3.3 70B interviewer, vault context, known-facts, today's events, drill-down, brand rule, deflection, agenda injection
+- [x] lib/ai/extract.ts — entity-centric extraction (Topic → Brand → Item or Topic → Entity), no You→Topic links, agenda update after each run
+- [x] lib/ai/checklists.ts — required attributes per topic, Agenda type, CHECKLIST_PROMPT for system prompt
+- [x] lib/ai/topics.ts — 31 topics
+- [x] lib/ai/categories.ts — topic → subcategories map (still present, not used in graph routing)
+- [x] Supabase: conversations.agenda JSONB — tracks current entity + pending threads across turns
+- [x] Graph updates — event-driven (fires once 4s after each chat reply)
+- [x] Supabase: reset_vault(user_id) function — idempotent vault wipe, re-seeds "You" root at _profile.md
 - [x] Supabase: scheduled_for date column on vault_notes + partial index for today's event queries
-- [x] HYPE_BUSINESS_ASSESSMENT.md — 5-page business memo: market size, competitors, differentiation, consent-based ad model, unit economics, risks, next steps
+- [x] HYPE_BUSINESS_ASSESSMENT.md — business memo: consent-based ad model, unit economics, next steps
 
 ## Claude Code plugins installed (user-scoped, active next session)
 - `context-mode` — keeps large outputs out of context window (was pre-installed)
@@ -67,27 +68,32 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 5. Root "You" node is always at path `_profile.md`, topic `Profile` — extraction depends on this
 6. `.mcp.json` is gitignored — Supabase MCP needs `SUPABASE_ACCESS_TOKEN` set locally in the file (not committed)
 
-## Key extraction rules (session 3 decisions)
-- 5-layer graph: You → Topic hub → Category hub → Fact → Attribute nodes
-- Root note path must be `_profile.md` (not "You") — extraction looks it up by path
-- **Durability rule**: only extract ownership, preference, intent, or routine facts
-- **No inference**: never derive a fact from implication ("half day" ≠ part-time)
-- **No pattern from single instance**: routine facts require explicit frequency from the user
-- One-time activities ("went shopping", "had a coffee") are skipped unless a concrete purchase/preference is captured
-- Brand rule: if user says "the brand" without naming it, always ask before moving on
+## Key extraction rules (session 5 decisions)
+- Entity-centric graph: Topic → Brand → Item OR Topic → Entity (no category hub layer)
+- "You" node is isolated — visual anchor only, no outgoing links from extraction
+- Graph structure: topics float freely as independent clusters
+- **Durability rule**: owned items, preferred brands, frequent places, recurring relationships
+- **No inference**: never derive from implication
+- **No pattern from single instance**: routine requires explicit frequency
+- Places and people mentioned in passing ARE extracted (become pending agenda threads)
+- Brand nodes: source="system", no required attributes
+- Item/entity nodes: source="conversation", required attributes checked against checklists.ts
 
-## Key interviewer rules (session 3 decisions)
-- Drill-down order: clothing → where bought → color → size → price (never ask "any special occasion?")
-- Beauty/skincare: brand name first, then what it is, then how they use it
-- Deflection ("adult stuff", "personal"): accept and hard-pivot to unrelated topic, no follow-up
-- Known-facts list injected into system prompt to prevent re-asking already-captured information
+## Key interviewer rules (session 5 decisions)
+- Agenda injected every turn: current entity + pending threads, AI blocked from topic changes until current is resolved
+- Natural attribute grouping: color + material asked together ("What did it look like — color, material?")
+- Value rule: never ask yes/no about an attribute — always ask for the specific value
+- Drill-down for clothing: what it is → color + material (together) → size → price (only if mentioned)
+- Deflection: accept, hard-pivot, never follow up on deflected topic
+- Known-facts list injected to prevent re-asking
 
 ## What's NOT done yet (next steps in order)
-1. Landing page — marketing page at / (currently redirects to /signup); lead with "Be in control of your ads" + "Build your personal graph"
-2. Vercel deployment
-3. Affiliate link integration — Amazon Associates, Ticketmaster, Booking.com (Day 1 ad revenue, no advertiser deals needed)
-4. Ad moment UI — sponsored offer card inside ChatPanel, clearly labeled, triggered only after user says yes
-5. Mobile app (Expo) — only after web is live and validated
+1. **Graph + conversation flow refinements (session 5 left open)** — further improvements to graph representation and conversation agenda flow identified during testing; details to be discussed at session start
+2. Landing page — marketing page at / (currently redirects to /signup); lead with "Be in control of your ads" + "Build your personal graph"
+3. Vercel deployment
+4. Affiliate link integration — Amazon Associates, Ticketmaster, Booking.com (Day 1 ad revenue, no advertiser deals needed)
+5. Ad moment UI — sponsored offer card inside ChatPanel, clearly labeled, triggered only after user says yes
+6. Mobile app (Expo) — only after web is live and validated
 
 ## Common commands
 ```bash
@@ -136,10 +142,10 @@ apps/web/
 │   ├── supabase/server.ts          ← SSR client
 │   ├── supabase/admin.ts           ← service role (server-only)
 │   └── ai/
-│       ├── extract.ts              ← 5-layer extraction pipeline
+│       ├── extract.ts              ← entity-centric extraction + agenda update
+│       ├── checklists.ts           ← required attrs per topic, Agenda type, CHECKLIST_PROMPT
 │       ├── topics.ts               ← 31 topics (source of truth)
-│       ├── categories.ts           ← topic → subcategories map
-│       └── interviewer.md          ← human-readable interviewer spec
+│       └── categories.ts           ← topic → subcategories map (kept, not used in routing)
 ├── types/database.ts               ← all TypeScript types
 └── supabase/schema.sql             ← full DB schema
 ```
