@@ -1,8 +1,14 @@
 export type AgendaItem = {
   title: string
   topic: string
-  path: string
+  brand: string | null
+  entity_type: string
+  intent: boolean
+  scheduled_for: string | null
+  description: string
   missing: string[]
+  attributes: { title: string; value: string }[]
+  turns: number
 }
 
 export type Agenda = {

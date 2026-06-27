@@ -1,287 +1,179 @@
-import Groq from "groq-sdk"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { TOPICS } from "./topics"
 import { getMissingAttrs, type Agenda, type AgendaItem } from "./checklists"
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
-
-type Message = { role: string; content: string }
-type Attribute = { title: string; value: string }
-type Entity = {
+export type Attr = { title: string; value: string }
+export type RawEntity = {
   title: string
   topic: string
   brand: string | null
   entity_type: "item" | "brand" | "place" | "event" | "person"
-  content_md: string
-  attributes: Attribute[]
   intent: boolean
   scheduled_for: string | null
+  description: string
 }
+export type ExtractionResult = { attributes: Attr[]; entities: RawEntity[] }
 
 const toSlug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
 
-function buildPrompt(existingTitles: string[], today: string) {
-  const known = existingTitles.length
-    ? `\n\nAlready captured — do NOT recreate these:\n${existingTitles.map((t) => `- ${t}`).join("\n")}`
-    : ""
+// ponytail: flush after this many turns if entity still incomplete — avoids needing an explicit abandon signal
+const ABANDON_AFTER_TURNS = 5
 
-  return `You extract ENTITIES from conversations about a person's life.
-An entity is a specific real-world thing: a purchase, a brand they use, a place they visit, an event, or a person in their life.
-Today's date: ${today}
-
-Return JSON exactly:
-{"entities": [{"title": "...", "topic": "...", "brand": null, "entity_type": "item", "content_md": "...", "attributes": [], "intent": false, "scheduled_for": null}]}
-
-Fields:
-- title: the THING itself, not a statement about it
-- topic: one of: ${TOPICS.join(" | ")}
-- brand: exact brand/company name if named, null otherwise
-- entity_type: "item" | "brand" | "place" | "event" | "person"
-- content_md: one sentence describing this entity
-- attributes: concrete known properties as [{"title": "Color", "value": "Blue"}]
-- intent: true if the person wants/plans to get this but doesn't have it yet
-- scheduled_for: ISO date (YYYY-MM-DD) for dated events/trips, null otherwise
-
-entity_type guide:
-- "item": a specific product (shirt, belt, phone, coffee order)
-- "brand": a brand or store when no specific item is known ("Shops at Zara")
-- "place": a location they go to (restaurant, mall, gym, park)
-- "event": a happening (trip, concert, appointment)
-- "person": someone in their life (partner, friend, family member)
-
-title must name THE THING, not describe their relationship to it:
-✓ "Blue Belt"         not "Exchanged Belt at Zara"
-✓ "Zara" (brand)      not "Shops at Zara"
-✓ "Westfield Mall" (place) not "Goes to Westfield Mall"
-✓ "Paris Trip"        not "Traveled to Paris"
-
-When entity_type is "brand", set brand = title.
-
-attributes — only what was explicitly stated:
-- Clothing/accessory → Color, Size, Material, Price (only if stated)
-- Tech → Model, Price (only if stated)
-- Place → Cuisine, Location, Frequency, With
-- Event → Date, Location, With
-- Person → Relationship, Context
-
-Places and people mentioned even in passing are worth extracting — they become pending threads for the interviewer to follow up on. A mall visited, a restaurant mentioned, a friend referenced: extract them even with no attributes yet.
-
-Durability — extract entities that reveal something about this person's life: owned items, preferred brands, frequent places, relationships, plans. Skip pure one-off filler ("had a coffee") unless it yields a concrete entity.
-
-No inference — only extract what was explicitly stated.
-No pattern from a single instance — "visits often" or "goes regularly" requires the user to have stated frequency.${known}`
+function attrsToContentMd(attrs: Attr[]): string {
+  return attrs.map((a) => `- **${a.title}**: ${a.value}`).join("\n")
 }
 
-async function updateConversationAgenda(
+function makeAgendaItem(entity: RawEntity): AgendaItem {
+  return {
+    title: entity.title,
+    topic: entity.topic,
+    brand: entity.brand ?? null,
+    entity_type: entity.entity_type,
+    intent: entity.intent ?? false,
+    scheduled_for: entity.scheduled_for ?? null,
+    description: entity.description ?? "",
+    missing: getMissingAttrs(entity.topic, ""),
+    attributes: [],
+    turns: 0,
+  }
+}
+
+async function writeEntityToVault(
   supabase: ReturnType<typeof createAdminClient>,
-  conversationId: string
-) {
-  const { data: rows } = await supabase
-    .from("extractions")
-    .select("vault_notes(title, topic, path, content_md, source)")
-    .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: true })
-
-  const seen = new Set<string>()
-  const incomplete: AgendaItem[] = []
-
-  for (const row of rows ?? []) {
-    const note = (row as any).vault_notes
-    if (!note || note.source !== "conversation" || seen.has(note.path)) continue
-    seen.add(note.path)
-    const missing = getMissingAttrs(note.topic, note.content_md ?? "")
-    if (missing.length > 0) {
-      incomplete.push({ title: note.title, topic: note.topic, path: note.path, missing })
-    }
-  }
-
-  const agenda: Agenda = {
-    current: incomplete[0] ?? null,
-    pending: incomplete.slice(1),
-  }
-
-  await supabase.from("conversations").update({ agenda }).eq("id", conversationId)
-}
-
-export async function extractFacts(
+  userId: string,
   conversationId: string,
-  messages: Message[],
-  userId: string
+  item: AgendaItem
 ) {
-  const supabase = createAdminClient()
+  const topicDir = toSlug(item.topic)
 
-  const { data: existing } = await supabase
+  const { data: topicHub } = await supabase
     .from("vault_notes")
-    .select("title")
-    .eq("user_id", userId)
-    .eq("source", "conversation")
+    .upsert(
+      { user_id: userId, path: `${topicDir}/index.md`, title: item.topic, topic: item.topic, content_md: "", source: "system", confidence: 1 },
+      { onConflict: "user_id,path" }
+    )
+    .select("id")
+    .single()
 
-  const existingTitles = (existing ?? []).map((n) => n.title)
+  if (!topicHub) return
 
-  const today = new Date().toISOString().split("T")[0]
-  const transcript = messages
-    .slice(-6)
-    .map((m) => `${m.role}: ${m.content}`)
-    .join("\n")
+  const attrLines = item.attributes.map((a) => `- **${a.title}**: ${a.value}`)
+  const fullContent = [item.description, attrLines.join("\n")].filter(Boolean).join("\n\n")
 
-  let entities: Entity[] = []
-  try {
-    const res = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
-      max_tokens: 600,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: buildPrompt(existingTitles, today) },
-        { role: "user", content: transcript },
-      ],
-    })
-    entities = JSON.parse(res.choices[0]?.message?.content ?? "{}").entities ?? []
-  } catch (err) {
-    console.error("[extract] Groq call failed:", err)
-    return
-  }
-
-  if (!entities.length) {
-    await updateConversationAgenda(supabase, conversationId)
-    return
-  }
-
-  for (const entity of entities) {
-    const topicDir = toSlug(entity.topic)
-    const topicPath = `${topicDir}/index.md`
-
-    // Topic hub
-    const { data: topicHub, error: topicErr } = await supabase
+  if (!item.brand) {
+    const entityPath = `${topicDir}/${toSlug(item.title)}.md`
+    const { data: entityNote } = await supabase
       .from("vault_notes")
       .upsert(
-        { user_id: userId, path: topicPath, title: entity.topic, topic: entity.topic, content_md: "", source: "system", confidence: 1 },
+        { user_id: userId, path: entityPath, title: item.title, topic: item.topic, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8 },
         { onConflict: "user_id,path" }
       )
       .select("id")
       .single()
+    if (!entityNote) return
+    await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: topicHub.id, target_note_id: entityNote.id }, { onConflict: "source_note_id,target_note_id" })
+    await supabase.from("extractions").insert({ conversation_id: conversationId, note_id: entityNote.id })
+    return
+  }
 
-    if (topicErr || !topicHub) {
-      console.error("[extract] topic hub upsert failed:", topicErr)
-      continue
-    }
+  const brandPath = `${topicDir}/${toSlug(item.brand)}.md`
 
-    const attrLines = (entity.attributes ?? []).map((a) => `- **${a.title}**: ${a.value}`)
-    const fullContent = attrLines.length
-      ? `${entity.content_md}\n\n${attrLines.join("\n")}`
-      : entity.content_md
-
-    if (entity.brand) {
-      const brandSlug = toSlug(entity.brand)
-      const brandPath = `${topicDir}/${brandSlug}.md`
-
-      if (entity.entity_type === "brand") {
-        // Brand-level preference: accumulate into brand node content
-        const { data: existingBrand } = await supabase
-          .from("vault_notes")
-          .select("id, content_md")
-          .eq("user_id", userId)
-          .eq("path", brandPath)
-          .maybeSingle()
-
-        if (existingBrand) {
-          if (!existingBrand.content_md?.includes(entity.content_md)) {
-            const updated = existingBrand.content_md
-              ? `${existingBrand.content_md}\n- ${entity.content_md}`
-              : `- ${entity.content_md}`
-            await supabase.from("vault_notes").update({ content_md: updated }).eq("id", existingBrand.id)
-          }
-          await supabase.from("vault_links").upsert(
-            { user_id: userId, source_note_id: topicHub.id, target_note_id: existingBrand.id },
-            { onConflict: "source_note_id,target_note_id" }
-          )
-        } else {
-          const { data: brandNote } = await supabase
-            .from("vault_notes")
-            .insert({
-              user_id: userId, path: brandPath, title: entity.brand, topic: entity.topic,
-              content_md: `- ${entity.content_md}`, source: "system", confidence: 1,
-            })
-            .select("id")
-            .single()
-
-          if (brandNote) {
-            await supabase.from("vault_links").upsert(
-              { user_id: userId, source_note_id: topicHub.id, target_note_id: brandNote.id },
-              { onConflict: "source_note_id,target_note_id" }
-            )
-            await supabase.from("extractions").insert({ conversation_id: conversationId, note_id: brandNote.id })
-          }
-        }
-      } else {
-        // Specific item under a brand: Topic → Brand → Item
-        const entitySlug = toSlug(entity.title)
-        const entityPath = `${topicDir}/${brandSlug}/${entitySlug}.md`
-
-        const { data: brandHub } = await supabase
-          .from("vault_notes")
-          .upsert(
-            { user_id: userId, path: brandPath, title: entity.brand, topic: entity.topic, content_md: "", source: "system", confidence: 1 },
-            { onConflict: "user_id,path" }
-          )
-          .select("id")
-          .single()
-
-        if (!brandHub) continue
-
-        await supabase.from("vault_links").upsert(
-          { user_id: userId, source_note_id: topicHub.id, target_note_id: brandHub.id },
-          { onConflict: "source_note_id,target_note_id" }
-        )
-
-        const { data: entityNote } = await supabase
-          .from("vault_notes")
-          .upsert(
-            {
-              user_id: userId, path: entityPath, title: entity.title, topic: entity.topic,
-              content_md: fullContent, intent: entity.intent ?? false,
-              scheduled_for: entity.scheduled_for ?? null, source: "conversation", confidence: 0.8,
-            },
-            { onConflict: "user_id,path" }
-          )
-          .select("id")
-          .single()
-
-        if (!entityNote) continue
-
-        await supabase.from("vault_links").upsert(
-          { user_id: userId, source_note_id: brandHub.id, target_note_id: entityNote.id },
-          { onConflict: "source_note_id,target_note_id" }
-        )
-        await supabase.from("extractions").insert({ conversation_id: conversationId, note_id: entityNote.id })
+  if (item.entity_type === "brand") {
+    const { data: existing } = await supabase.from("vault_notes").select("id, content_md").eq("user_id", userId).eq("path", brandPath).maybeSingle()
+    if (existing) {
+      if (!existing.content_md?.includes(item.description)) {
+        const updated = existing.content_md ? `${existing.content_md}\n- ${item.description}` : `- ${item.description}`
+        await supabase.from("vault_notes").update({ content_md: updated }).eq("id", existing.id)
       }
+      await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: topicHub.id, target_note_id: existing.id }, { onConflict: "source_note_id,target_note_id" })
     } else {
-      // No brand: Topic → Entity directly
-      const entitySlug = toSlug(entity.title)
-      const entityPath = `${topicDir}/${entitySlug}.md`
-
-      const { data: entityNote } = await supabase
+      const { data: brandNote } = await supabase
         .from("vault_notes")
-        .upsert(
-          {
-            user_id: userId, path: entityPath, title: entity.title, topic: entity.topic,
-            content_md: fullContent, intent: entity.intent ?? false,
-            scheduled_for: entity.scheduled_for ?? null, source: "conversation", confidence: 0.8,
-          },
-          { onConflict: "user_id,path" }
-        )
+        .insert({ user_id: userId, path: brandPath, title: item.brand, topic: item.topic, content_md: `- ${item.description}`, source: "system", confidence: 1 })
         .select("id")
         .single()
+      if (!brandNote) return
+      await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: topicHub.id, target_note_id: brandNote.id }, { onConflict: "source_note_id,target_note_id" })
+      await supabase.from("extractions").insert({ conversation_id: conversationId, note_id: brandNote.id })
+    }
+    return
+  }
 
-      if (!entityNote) continue
+  // Topic → Brand → Item
+  const { data: brandHub } = await supabase
+    .from("vault_notes")
+    .upsert(
+      { user_id: userId, path: brandPath, title: item.brand, topic: item.topic, content_md: "", source: "system", confidence: 1 },
+      { onConflict: "user_id,path" }
+    )
+    .select("id")
+    .single()
+  if (!brandHub) return
 
-      await supabase.from("vault_links").upsert(
-        { user_id: userId, source_note_id: topicHub.id, target_note_id: entityNote.id },
-        { onConflict: "source_note_id,target_note_id" }
-      )
-      await supabase.from("extractions").insert({ conversation_id: conversationId, note_id: entityNote.id })
+  await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: topicHub.id, target_note_id: brandHub.id }, { onConflict: "source_note_id,target_note_id" })
+
+  const entityPath = `${topicDir}/${toSlug(item.brand)}/${toSlug(item.title)}.md`
+  const { data: entityNote } = await supabase
+    .from("vault_notes")
+    .upsert(
+      { user_id: userId, path: entityPath, title: item.title, topic: item.topic, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8 },
+      { onConflict: "user_id,path" }
+    )
+    .select("id")
+    .single()
+  if (!entityNote) return
+
+  await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: brandHub.id, target_note_id: entityNote.id }, { onConflict: "source_note_id,target_note_id" })
+  await supabase.from("extractions").insert({ conversation_id: conversationId, note_id: entityNote.id })
+}
+
+export async function extractFacts(
+  conversationId: string,
+  userId: string,
+  extraction: ExtractionResult
+) {
+  const supabase = createAdminClient()
+
+  const { data: conv } = await supabase.from("conversations").select("agenda").eq("id", conversationId).single()
+  let agenda: Agenda = (conv?.agenda as Agenda) ?? { current: null, pending: [] }
+
+  // Guard against old agenda schema missing new fields
+  if (agenda.current) {
+    agenda.current.attributes ??= []
+    agenda.current.turns ??= 0
+  }
+
+  const { data: vaultNotes } = await supabase.from("vault_notes").select("title").eq("user_id", userId).eq("source", "conversation")
+  const knownTitles = new Set([
+    agenda.current?.title,
+    ...agenda.pending.map((p) => p.title),
+    ...(vaultNotes ?? []).map((n) => n.title),
+  ].filter(Boolean) as string[])
+
+  // Merge new attributes into current entity buffer
+  if (agenda.current && extraction.attributes.length) {
+    const existingKeys = new Set(agenda.current.attributes.map((a) => a.title))
+    for (const attr of extraction.attributes) {
+      if (!existingKeys.has(attr.title)) agenda.current.attributes.push(attr)
     }
   }
 
-  // Update agenda after all entities are processed
-  await updateConversationAgenda(supabase, conversationId)
+  if (agenda.current) {
+    agenda.current.turns += 1
+    agenda.current.missing = getMissingAttrs(agenda.current.topic, attrsToContentMd(agenda.current.attributes))
+
+    if (agenda.current.missing.length === 0 || agenda.current.turns >= ABANDON_AFTER_TURNS) {
+      await writeEntityToVault(supabase, userId, conversationId, agenda.current)
+      agenda.current = agenda.pending.shift() ?? null
+    }
+  }
+
+  // Add newly detected entities to agenda (skip already tracked)
+  for (const entity of extraction.entities) {
+    if (knownTitles.has(entity.title)) continue
+    const item = makeAgendaItem(entity)
+    if (!agenda.current) agenda.current = item
+    else agenda.pending.push(item)
+  }
+
+  await supabase.from("conversations").update({ agenda }).eq("id", conversationId)
 }

@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse, after } from "next/server"
-import Groq from "groq-sdk"
 import { createClient } from "@/lib/supabase/server"
-import { extractFacts } from "@/lib/ai/extract"
+import { extractFacts, type ExtractionResult } from "@/lib/ai/extract"
 import { TOPICS } from "@/lib/ai/topics"
 import { CHECKLIST_PROMPT, type Agenda } from "@/lib/ai/checklists"
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
+// ponytail: fetch over SDK — no new dep, one URL to swap providers
+const CHAT_URL = "https://api.cerebras.ai/v1/chat/completions"
+const CHAT_KEY = process.env.CEREBRAS_API_KEY!
+const CHAT_MODEL = "gpt-oss-120b"
 
 const SYSTEM_PROMPT = `You are a friendly, curious companion learning about someone's life — their preferences, activities, habits, people, and places.
 
@@ -55,7 +57,27 @@ During the conversation:
 - If the user deflects ("adult stuff", "personal", "rather not say"), accept it and pivot to a completely unrelated subject. Never follow up on the deflected topic.
 
 Topics to explore over time — don't rush, one session covers one thread:
-${TOPICS.map((t) => `- ${t}`).join("\n")}`
+${TOPICS.map((t) => `- ${t}`).join("\n")}
+
+## Response format — always reply with valid JSON only, no other text:
+{
+  "reply": "your message to the user",
+  "extraction": {
+    "attributes": [],
+    "entities": []
+  }
+}
+
+extraction.attributes: concrete values the user explicitly stated about the current entity this exchange.
+  Each: { "title": "color", "value": "black" }
+  Empty array if nothing new stated or no current entity.
+
+extraction.entities: NEW things mentioned not in the known facts list — purchases, brands, places, people, events.
+  Each: { "title": "Belt", "topic": "Style", "brand": "Zara", "entity_type": "item", "intent": false, "scheduled_for": null, "description": "one sentence" }
+  entity_type: "item" | "brand" | "place" | "event" | "person"
+  topic: pick the most semantically accurate from the 31 topics above
+  title: the specific thing ("Belt" not "bought a belt")
+  Places and people mentioned in passing are worth capturing.`
 
 function buildAgendaContext(agenda: Agenda): string {
   if (!agenda.current) return ""
@@ -159,16 +181,45 @@ export async function POST(req: NextRequest) {
     buildAgendaContext(agenda),
   ].filter(Boolean).join("\n\n")
 
-  const response = await groq.chat.completions.create({
-    model: "llama-3.3-70b-versatile",
-    max_tokens: 150,
-    messages: [
-      { role: "system", content: systemPrompt },
-      ...messages.map((m) => ({ role: m.role, content: m.content })),
-    ],
+  const chatRes = await fetch(CHAT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${CHAT_KEY}` },
+    body: JSON.stringify({
+      model: CHAT_MODEL,
+      max_tokens: 2000,
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...messages.map((m) => ({ role: m.role, content: m.content })),
+      ],
+    }),
   })
 
-  const reply = response.choices[0]?.message?.content ?? ""
+  if (!chatRes.ok) {
+    const errBody = await chatRes.json().catch(() => ({}))
+    console.error("[chat] Cerebras error:", chatRes.status, JSON.stringify(errBody))
+    const isRateLimit = chatRes.status === 429
+    return NextResponse.json(
+      { error: isRateLimit ? "rate_limit" : "groq_error" },
+      { status: chatRes.status }
+    )
+  }
+
+  const chatData = await chatRes.json()
+  const msg = chatData.choices[0]?.message ?? {}
+  const raw = msg.content || msg.reasoning || ""
+  console.log("[chat] finish_reason:", chatData.choices[0]?.finish_reason, "| raw:", raw.slice(0, 200))
+
+  let reply = raw
+  let extraction: ExtractionResult = { attributes: [], entities: [] }
+  try {
+    const parsed = JSON.parse(raw)
+    reply = parsed.reply ?? raw
+    extraction = parsed.extraction ?? { attributes: [], entities: [] }
+    console.log("[chat] parsed reply:", reply.slice(0, 150))
+  } catch {
+    // model didn't return JSON — use raw as reply, skip extraction this turn
+    console.log("[chat] JSON parse failed, using raw as reply")
+  }
 
   const lastUserMsg = messages.findLast((m) => m.role === "user")
   if (lastUserMsg && conversationId) {
@@ -177,7 +228,7 @@ export async function POST(req: NextRequest) {
       { conversation_id: conversationId, role: "assistant", content: reply },
     ])
     after(() =>
-      extractFacts(conversationId, messages, user.id).catch((err) =>
+      extractFacts(conversationId, user.id, extraction).catch((err) =>
         console.error("[chat] extraction failed:", err)
       )
     )

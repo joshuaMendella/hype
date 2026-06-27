@@ -79,12 +79,16 @@ export default function ChatPanel({ userId, userName, onReply }: { userId: strin
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: next, userId }),
       })
-      if (!res.ok) throw new Error()
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setCurrentAi(body.error === "rate_limit"
+          ? "I've hit my daily message limit — check back in a bit."
+          : "Something slipped on my end — want to try that again?")
+        return
+      }
       const { reply } = await res.json()
       setCurrentAi(reply)
       onReply?.()
-    } catch {
-      setCurrentAi("Something slipped on my end — want to try that again?")
     } finally {
       setLoading(false)
       setAiVisible(true)
