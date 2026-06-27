@@ -27,12 +27,13 @@ function nodeRadius(degree: number) {
   return Math.max(4, Math.min(20, 4 + Math.sqrt(degree + 1) * 4))
 }
 
-function noteToNode(note: VaultNote): GraphNode {
+function noteToNode(note: Pick<VaultNote, "id" | "title" | "topic" | "path" | "intent" | "content_md">): GraphNode {
   return {
     id: note.id,
     title: note.title,
     topic: note.topic,
     path: note.path,
+    intent: note.intent ?? false,
     wordCount: note.content_md?.split(" ").length ?? 1,
   }
 }
@@ -219,7 +220,7 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
     // ponytail: small delay so extraction (fire-and-forget after()) has time to write
     const id = setTimeout(async () => {
       const [{ data: notes }, { data: links }] = await Promise.all([
-        supabase.from("vault_notes").select("id, title, topic, path, content_md"),
+        supabase.from("vault_notes").select("id, title, topic, path, content_md, intent"),
         supabase.from("vault_links").select("id, source_note_id, target_note_id, anchor_text"),
       ])
       if (!notes || !links) return

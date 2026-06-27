@@ -1,4 +1,5 @@
-export type { Topic } from "@/lib/ai/topics"
+import type { Topic } from "@/lib/ai/topics"
+export type { Topic }
 
 export type NoteSource = "conversation" | "inferred" | "user-confirmed" | "system"
 
@@ -8,6 +9,7 @@ export interface Profile {
   id: string
   email: string | null
   display_name: string | null
+  onboarded: boolean
   created_at: string
   updated_at: string
 }

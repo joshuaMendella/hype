@@ -10,7 +10,7 @@ export default async function GraphPage() {
   if (!user) redirect("/login")
 
   const [{ data: notes }, { data: links }] = await Promise.all([
-    supabase.from("vault_notes").select("id, title, topic, path, content_md"),
+    supabase.from("vault_notes").select("id, title, topic, path, content_md, intent"),
     supabase.from("vault_links").select("id, source_note_id, target_note_id, anchor_text"),
   ])
 
@@ -22,6 +22,7 @@ export default async function GraphPage() {
       title: n.title,
       topic: n.topic,
       path: n.path,
+      intent: n.intent ?? false,
       wordCount: n.content_md?.split(" ").length ?? 1,
     })),
     links: (links ?? []).map((l) => ({
