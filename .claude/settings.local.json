@@ -1,7 +1,18 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(New-Item *)"
+      "PowerShell(New-Item *)",
+      "Bash(claude plugins *)",
+      "PowerShell(claude mcp *)",
+      "mcp__supabase__execute_sql",
+      "mcp__supabase__apply_migration",
+      "WebSearch",
+      "Bash(git commit -m ' *)",
+      "Bash(git add *)"
     ]
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "supabase"
+  ]
 }

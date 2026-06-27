@@ -49,6 +49,7 @@ Clothing / accessory: what exactly it is → color + material + size (bundled na
 Beauty product: brand name → what it is → how they use it
 Tech: brand + model → where from
 Place visited: which place → what for → with whom → how often
+City/location revealed ("my city", "I'm from", "I live in"): confirm it as their home city ("Oh, you're based in X?") — capture as a place entity with description "home city / current residence"
 Person mentioned: who they are → their relationship to the user
 Event: what kind → where → with whom
 
@@ -121,15 +122,16 @@ ${TOPICS.map((t) => `- ${t}`).join("\n")}
   }
 }
 
-extraction.attributes: concrete values the user explicitly stated about the current entity this turn.
+extraction.attributes: concrete values stated THIS TURN about the entity already being tracked (the one in the active agenda). Use this ONLY when drilling down on an existing entity — not when introducing a new one.
   Each: { "title": "Color", "value": "black" }
-  Empty array [] if no concrete value was stated, or no current entity.
+  Empty array [] if the user introduced a new entity this turn, or no concrete value was stated.
 
 extraction.entities: NEW things mentioned that are not in the known facts list — purchases, places, people, events, brands.
-  Each: { "title": "Belt", "topic": "Style", "brand": "Zara", "entity_type": "item", "intent": false, "scheduled_for": null, "description": "one-sentence summary" }
+  Each: { "title": "Belt", "topic": "Style", "brand": "Zara", "entity_type": "item", "intent": false, "scheduled_for": null, "description": "one-sentence summary", "attributes": [] }
   entity_type: "item" | "brand" | "place" | "event" | "person"
-  topic: most accurate match from the 31 topics listed above
+  topic: MUST be exactly one of: Identity, Location, Relationships, Routine, Work, Health, Food, Entertainment, Style, Hobbies, Travel, Goals, Technology, Education, Home, Childhood, Community, Pets, Creativity, Finance, Beliefs, Social, Life Events, Parenting, Vehicle, Real Estate, Beauty, Sports, Events, Gaming, Life Stage
   title: the specific thing ("Belt" not "bought a belt")
+  attributes: concrete values stated about THIS entity in the same turn — e.g. if user says "a black leather belt from Zara", attributes=[{title:"Color",value:"black"},{title:"Material",value:"leather"}]
   Capture places and people mentioned in passing too.`
 
 const ONBOARDING_PROMPT = `You are welcoming a new user to their personal vault for the first time. Walk them through what this is, one short message at a time, waiting for their acknowledgment before continuing.
@@ -157,7 +159,7 @@ Step 4 — after user acknowledges step 3:
 Step 5 — after user says yes, let's go, or any confirmation:
 Give a warm one-liner to kick things off, then ask your first open-ended question about their day or recent activities. Set onboarding_complete to true.
 
-If the user skips ahead or says "let's go" / "start" / "sure" early at any point, jump straight to Step 5.
+If the user explicitly asks to skip the intro ("skip this", "I know", "just start already"), jump straight to Step 5. Otherwise, a simple acknowledgment ("sure", "okay", "let's do it") just advances to the next step.
 
 ## Response format — ALWAYS return valid JSON only. No other text.
 {
@@ -202,7 +204,7 @@ export async function POST(req: NextRequest) {
     messages: Array<{ role: "user" | "assistant"; content: string }>
   }
 
-  if (!Array.isArray(messages) || messages.length === 0) {
+  if (!Array.isArray(messages)) {
     return NextResponse.json({ error: "Invalid messages" }, { status: 400 })
   }
 
@@ -309,15 +311,24 @@ export async function POST(req: NextRequest) {
   let reply = raw
   let extraction: ExtractionResult = { attributes: [], entities: [] }
   let onboardingComplete = false
-  try {
-    const parsed = JSON.parse(raw)
+  function tryParse(s: string) {
+    const parsed = JSON.parse(s)
     reply = parsed.reply ?? raw
     extraction = parsed.extraction ?? { attributes: [], entities: [] }
     onboardingComplete = parsed.onboarding_complete === true
+  }
+  try {
+    tryParse(raw)
     console.log("[chat] parsed reply:", reply.slice(0, 150))
   } catch {
-    // model didn't return JSON — use raw as reply, skip extraction this turn
-    console.log("[chat] JSON parse failed, using raw as reply")
+    // model output text before JSON block — extract and retry
+    const jsonMatch = raw.match(/\{[\s\S]*\}/)
+    if (jsonMatch) {
+      try { tryParse(jsonMatch[0]); console.log("[chat] parsed reply (recovered):", reply.slice(0, 150)) }
+      catch { console.log("[chat] JSON parse failed, using raw as reply") }
+    } else {
+      console.log("[chat] JSON parse failed, using raw as reply")
+    }
   }
 
   const lastUserMsg = messages.findLast((m) => m.role === "user")

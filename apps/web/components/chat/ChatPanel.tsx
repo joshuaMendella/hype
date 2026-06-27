@@ -7,17 +7,13 @@ interface ChatMessage {
   content: string
 }
 
-function opening(name: string | null) {
-  const greeting = name ? `Hey ${name[0].toUpperCase() + name.slice(1)}` : "Hey"
-  return `${greeting} — what have you been up to today?`
-}
-
 // ponytail: word-by-word reveal via recursive setTimeout, no animation lib
-function useTypewriter(text: string, speed = 52) {
+function useTypewriter(text: string, speed = 85) {
   const [displayed, setDisplayed] = useState("")
   const [done, setDone] = useState(false)
 
   useEffect(() => {
+    if (!text) { setDisplayed(""); setDone(false); return }
     setDisplayed("")
     setDone(false)
     const words = text.split(" ")
@@ -38,16 +34,28 @@ function useTypewriter(text: string, speed = 52) {
   return { displayed, done }
 }
 
-export default function ChatPanel({ userId, userName, onReply }: { userId: string; userName: string | null; onReply?: () => void }) {
+export default function ChatPanel({ userId, userName: _userName, onReply }: { userId: string; userName: string | null; onReply?: () => void }) {
   const [history, setHistory] = useState<ChatMessage[]>([])
-  const [currentAi, setCurrentAi] = useState(() => opening(userName))
-  const [aiVisible, setAiVisible] = useState(true)
+  const [currentAi, setCurrentAi] = useState("")
+  const [aiVisible, setAiVisible] = useState(false)
   const [input, setInput] = useState("")
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [canInput, setCanInput] = useState(false)
   const [focused, setFocused] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const { displayed, done } = useTypewriter(currentAi)
+
+  useEffect(() => {
+    fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: [], userId }),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then(({ reply }) => { setCurrentAi(reply); setAiVisible(true) })
+      .catch(() => { setCurrentAi("Hey — what have you been up to today?"); setAiVisible(true) })
+      .finally(() => setLoading(false))
+  }, [userId])
 
   useEffect(() => {
     if (done) setCanInput(true)
@@ -125,7 +133,7 @@ export default function ChatPanel({ userId, userName, onReply }: { userId: strin
         <p
           style={{
             fontFamily: "var(--font-poppins), sans-serif",
-            fontSize: "clamp(1.3rem, 2.6vw, 1.85rem)",
+            fontSize: currentAi.length > 200 ? "clamp(0.95rem, 1.7vw, 1.15rem)" : currentAi.length > 100 ? "clamp(1.1rem, 2.1vw, 1.45rem)" : "clamp(1.3rem, 2.6vw, 1.85rem)",
             fontWeight: 300,
             lineHeight: 1.7,
             color: "rgba(255,255,255,0.87)",

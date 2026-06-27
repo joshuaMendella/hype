@@ -10,6 +10,7 @@ export type RawEntity = {
   intent: boolean
   scheduled_for: string | null
   description: string
+  attributes?: Attr[]
 }
 export type ExtractionResult = { attributes: Attr[]; entities: RawEntity[] }
 
@@ -23,6 +24,7 @@ function attrsToContentMd(attrs: Attr[]): string {
 }
 
 function makeAgendaItem(entity: RawEntity): AgendaItem {
+  const seedAttrs = entity.attributes ?? []
   return {
     title: entity.title,
     topic: entity.topic,
@@ -31,8 +33,8 @@ function makeAgendaItem(entity: RawEntity): AgendaItem {
     intent: entity.intent ?? false,
     scheduled_for: entity.scheduled_for ?? null,
     description: entity.description ?? "",
-    missing: getMissingAttrs(entity.topic, ""),
-    attributes: [],
+    missing: getMissingAttrs(entity.topic, seedAttrs.map(a => `- **${a.title}**: ${a.value}`).join("\n")),
+    attributes: seedAttrs,
     turns: 0,
   }
 }

@@ -32,7 +32,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - RLS enabled on all tables — users can only access their own data
 - Three Supabase clients: `lib/supabase/client.ts` (browser), `lib/supabase/server.ts` (SSR), `lib/supabase/admin.ts` (server-only, bypasses RLS)
 
-## What's been built (as of 2026-06-27, updated session 7)
+## What's been built (as of 2026-06-27, updated session 8)
 - [x] Monorepo scaffold (Turborepo, pnpm, TypeScript)
 - [x] Next.js app scaffolded in apps/web
 - [x] Supabase schema: profiles, vault_notes, vault_links, conversations, messages, extractions
@@ -59,7 +59,16 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - [x] Interviewer persona redesigned (session 7) — new SYSTEM_PROMPT: banned hollow phrases, ≤12-word reaction cap, numbered focus priority, explicit memory-check rule, conversational drill-down phrasing, concrete dead-end thresholds, 3 session-end triggers, 4 input-handling cases (off-topic/emotional/jailbreak/sensitive), honest AI identity
 - [x] ONBOARDING_PROMPT — 4-step first-conversation intro, waits for user ack at each step, `onboarding_complete` signal marks profile as onboarded
 - [x] profiles.onboarded BOOLEAN — gates onboarding flow; set false → onboarding, set true → normal interview
-- [x] /resetall skill — wipes vault, clears agenda, resets onboarded flag in one command
+- [x] /hypereset skill — wipes vault, clears agenda, resets onboarded flag in one command
+- [x] Onboarding flow fixed (session 8) — ChatPanel now fetches opening from API on mount (messages: []); removed hardcoded opening() that bypassed server; route accepts empty messages array
+- [x] Onboarding skip-ahead rule tightened — "let's do it" now advances to next step, not Step 5; only explicit "skip this" / "just start already" jumps ahead
+- [x] JSON leak fix — model sometimes outputs text before JSON block; regex fallback extracts and retries the JSON block, preventing silent extraction failure
+- [x] Attribute bleed fix — entity-level attributes now nested inside extraction.entities[].attributes; top-level extraction.attributes is drill-down only (existing agenda entity); makeAgendaItem seeds attributes + missing from entity-level attrs
+- [x] Topic name enforcement — extraction prompt now inlines full topic enum instead of soft "from the list above" reference; prevents free-form topics like "Place visited"
+- [x] City/hometown detection — interviewer drill-down rule added: "my city X" → AI confirms as home city, captured as Location entity
+- [x] Typewriter speed slowed (52ms → 85ms per word)
+- [x] Dynamic font size in ChatPanel — scales down for longer AI messages (>100 chars, >200 chars breakpoints)
+- [x] /hypesave skill — end-of-session commit + push command
 
 ## Claude Code plugins installed (user-scoped, active next session)
 - `context-mode` — keeps large outputs out of context window (was pre-installed)
@@ -72,7 +81,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 2. Run `cd apps/web && pnpm dev` to start the dev server
 3. Chat: Cerebras gpt-oss-120b (free tier) — CEREBRAS_API_KEY in .env.local
 4. Extraction: Groq llama-3.1-8b-instant — GROQ_API_KEY in .env.local (extraction only, no chat)
-5. To reset everything for testing: `/resetall` (wipes vault, clears agenda, resets onboarding flag)
+5. To reset everything for testing: `/hypereset` (wipes vault, clears agenda, resets onboarding flag)
 6. Root "You" node is always at path `_profile.md`, topic `Profile` — extraction depends on this
 7. `.mcp.json` is gitignored — Supabase MCP needs `SUPABASE_ACCESS_TOKEN` set locally in the file (not committed)
 
@@ -87,7 +96,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - Brand nodes: source="system", no required attributes
 - Item/entity nodes: source="conversation", required attributes checked against checklists.ts
 
-## Key interviewer rules (session 7 decisions)
+## Key interviewer rules (session 7–8 decisions)
 - Agenda injected every turn: current entity + pending threads, AI blocked from topic changes until current is resolved
 - Natural attribute grouping: color + material + size bundled conversationally ("So how were those shoes? Color, size-wise?")
 - Value rule: never ask yes/no about an attribute — always ask for the specific value; if answer has no concrete value, ask again before moving on
@@ -100,6 +109,8 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - Identity: honest if asked ("Yeah, I'm an AI — but I'm mostly here to learn about you."), never volunteer it
 - First conversation: ONBOARDING_PROMPT fires instead of SYSTEM_PROMPT; 4-step walkthrough before interview begins
 - Known-facts list injected to prevent re-asking
+- City/hometown: when user says "my city X" or "I'm from X", confirm as home city and extract as Location entity
+- Onboarding skip: simple ack ("sure", "let's do it") advances one step; only "skip this" / "just start already" jumps to Step 5
 
 ## What's NOT done yet (next steps in order)
 1. Landing page — marketing page at / (currently redirects to /signup); lead with "Be in control of your ads" + "Build your personal graph"
