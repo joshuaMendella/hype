@@ -53,6 +53,9 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - [x] Supabase: reset_vault(user_id) function — idempotent vault wipe, re-seeds "You" root at _profile.md
 - [x] Supabase: scheduled_for date column on vault_notes + partial index for today's event queries
 - [x] HYPE_BUSINESS_ASSESSMENT.md — business memo: consent-based ad model, unit economics, next steps
+- [x] Single-model extraction — 70B (Cerebras gpt-oss-120b) returns JSON with reply + extraction data in one call; 8B Groq call eliminated from hot path
+- [x] extractFacts() decoupled from LLM — receives pre-extracted data, handles only agenda management + vault writes
+- [x] Chat provider switched to Cerebras (free tier, gpt-oss-120b, 120B params, reasoning model)
 
 ## Claude Code plugins installed (user-scoped, active next session)
 - `context-mode` — keeps large outputs out of context window (was pre-installed)
@@ -63,10 +66,12 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 ## START OF NEXT SESSION checklist
 1. Run `git log --oneline -5` to confirm state
 2. Run `cd apps/web && pnpm dev` to start the dev server
-3. GROQ_API_KEY is already in apps/web/.env.local — chat is working
-4. To reset vault for testing: `SELECT reset_vault('09158791-8006-453c-b176-98253e3ff1d8');` via Supabase MCP or SQL editor
-5. Root "You" node is always at path `_profile.md`, topic `Profile` — extraction depends on this
-6. `.mcp.json` is gitignored — Supabase MCP needs `SUPABASE_ACCESS_TOKEN` set locally in the file (not committed)
+3. Chat: Cerebras gpt-oss-120b (free tier) — CEREBRAS_API_KEY in .env.local
+4. Extraction: Groq llama-3.1-8b-instant — GROQ_API_KEY in .env.local (extraction only, no chat)
+5. To reset vault for testing: `SELECT reset_vault('09158791-8006-453c-b176-98253e3ff1d8');` via Supabase MCP or SQL editor
+6. Also reset agenda: `UPDATE conversations SET agenda = '{"current": null, "pending": []}'::jsonb WHERE user_id = '09158791-8006-453c-b176-98253e3ff1d8';`
+7. Root "You" node is always at path `_profile.md`, topic `Profile` — extraction depends on this
+8. `.mcp.json` is gitignored — Supabase MCP needs `SUPABASE_ACCESS_TOKEN` set locally in the file (not committed)
 
 ## Key extraction rules (session 5 decisions)
 - Entity-centric graph: Topic → Brand → Item OR Topic → Entity (no category hub layer)
@@ -88,7 +93,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - Known-facts list injected to prevent re-asking
 
 ## What's NOT done yet (next steps in order)
-1. **Graph + conversation flow refinements (session 5 left open)** — further improvements to graph representation and conversation agenda flow identified during testing; details to be discussed at session start
+1. **Conversation tone refinement (session 6 left open)** — gpt-oss-120b (reasoning model) works but tone/style has shifted vs Llama 3.3 70B; system prompt may need tuning for this model's behaviour
 2. Landing page — marketing page at / (currently redirects to /signup); lead with "Be in control of your ads" + "Build your personal graph"
 3. Vercel deployment
 4. Affiliate link integration — Amazon Associates, Ticketmaster, Booking.com (Day 1 ad revenue, no advertiser deals needed)
