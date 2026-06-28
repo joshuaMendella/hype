@@ -14,6 +14,8 @@ export interface Profile {
   updated_at: string
 }
 
+export type EntityType = "item" | "brand" | "place" | "person" | "event"
+
 export interface VaultNote {
   id: string
   user_id: string
@@ -24,6 +26,7 @@ export interface VaultNote {
   confidence: number
   intent: boolean
   source: NoteSource
+  entity_type: EntityType | null
   created_at: string
   updated_at: string
 }
@@ -34,6 +37,7 @@ export interface VaultLink {
   source_note_id: string
   target_note_id: string
   anchor_text: string | null
+  link_type: "brand" | "tag" | null
   created_at: string
 }
 
@@ -69,6 +73,8 @@ export interface GraphNode {
   path: string
   intent: boolean
   wordCount: number
+  source: NoteSource
+  entity_type: EntityType | null
   x?: number
   y?: number
   vx?: number
@@ -82,6 +88,7 @@ export interface GraphLink {
   source: string | GraphNode
   target: string | GraphNode
   anchor_text: string | null
+  link_type: "brand" | "tag" | null
 }
 
 export interface GraphData {

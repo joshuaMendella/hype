@@ -6,20 +6,33 @@ import { createClient } from "@/lib/supabase/client"
 import type { GraphData, GraphNode, GraphLink, VaultNote } from "@/types/database"
 
 const TOPIC_COLORS: Record<string, string> = {
-  Profile:  "#ffffff",
-  Work:     "#60a5fa",
-  Style:    "#f472b6",
-  Food:     "#fb923c",
-  Fitness:  "#4ade80",
-  People:   "#a78bfa",
-  Goals:    "#facc15",
-  Insights: "#67e8f9",
+  Profile:        "#ffffff",
+  Work:           "#60a5fa", Finance:      "#93c5fd", Education:  "#818cf8", Technology: "#6366f1",
+  Relationships:  "#a78bfa", Social:       "#c084fc", Community:  "#d8b4fe", Parenting:  "#e879f9",
+  Style:          "#f472b6", Beauty:       "#fb7185",
+  Food:           "#fb923c", Home:         "#fbbf24",
+  Health:         "#4ade80", Sports:       "#34d399", Hobbies:    "#2dd4bf",
+  Goals:          "#facc15", Beliefs:      "#eab308", Identity:   "#fde68a",
+  Travel:         "#67e8f9", Location:     "#22d3ee",
+  Entertainment:  "#f9a8d4", Gaming:       "#c026d3", Creativity: "#a855f7",
+  "Life Events":  "#94a3b8", "Life Stage": "#64748b", Childhood:  "#fca5a5", Routine:    "#86efac",
+  Pets:           "#fde047", Vehicle:      "#94a3b8", "Real Estate": "#78716c",
+}
+
+const ENTITY_TYPE_COLORS: Record<string, string> = {
+  item:   "#f472b6",
+  brand:  "#60a5fa",
+  place:  "#fb923c",
+  person: "#a78bfa",
+  event:  "#facc15",
 }
 
 const DEFAULT_COLOR = "#6b7280"
 
-function nodeColor(topic: string | null) {
-  return topic ? (TOPIC_COLORS[topic] ?? DEFAULT_COLOR) : DEFAULT_COLOR
+function nodeColor(node: GraphNode): string {
+  if (node.source === "system") return TOPIC_COLORS[node.topic ?? ""] ?? DEFAULT_COLOR
+  if (node.entity_type) return ENTITY_TYPE_COLORS[node.entity_type] ?? DEFAULT_COLOR
+  return TOPIC_COLORS[node.topic ?? ""] ?? DEFAULT_COLOR
 }
 
 // Size scales with connections — hubs are big, leaves are small
@@ -27,7 +40,7 @@ function nodeRadius(degree: number) {
   return Math.max(4, Math.min(20, 4 + Math.sqrt(degree + 1) * 4))
 }
 
-function noteToNode(note: Pick<VaultNote, "id" | "title" | "topic" | "path" | "intent" | "content_md">): GraphNode {
+function noteToNode(note: Pick<VaultNote, "id" | "title" | "topic" | "path" | "intent" | "content_md" | "source" | "entity_type">): GraphNode {
   return {
     id: note.id,
     title: note.title,
@@ -35,6 +48,8 @@ function noteToNode(note: Pick<VaultNote, "id" | "title" | "topic" | "path" | "i
     path: note.path,
     intent: note.intent ?? false,
     wordCount: note.content_md?.split(" ").length ?? 1,
+    source: note.source,
+    entity_type: note.entity_type ?? null,
   }
 }
 
@@ -105,12 +120,12 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
         .radius((d) => nodeRadius(degreeMap[d.id] ?? 0) + 10)
       )
 
-    // Links — Obsidian-style: thin, slightly purple-tinted
+    // Links — brand edges: faint purple; tag edges: barely-visible white
     const link = g.append("g")
       .selectAll("line")
       .data(links)
       .join("line")
-      .attr("stroke", "#a78bfa30")
+      .attr("stroke", (d) => d.link_type === "tag" ? "#ffffff08" : "#a78bfa20")
       .attr("stroke-width", 1)
 
     const node = g.append("g")
@@ -134,13 +149,15 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
     // Outer glow ring
     node.append("circle")
       .attr("r", (d) => nodeRadius(degreeMap[d.id] ?? 0) + 5)
-      .attr("fill", (d) => nodeColor(d.topic))
+      .attr("fill", (d) => nodeColor(d))
       .attr("opacity", 0.1)
 
-    // Main circle
+    // Main circle — filled for entity nodes, hollow ring for system hub nodes
     node.append("circle")
       .attr("r", (d) => nodeRadius(degreeMap[d.id] ?? 0))
-      .attr("fill", (d) => nodeColor(d.topic))
+      .attr("fill", (d) => d.source === "system" ? "none" : nodeColor(d))
+      .attr("stroke", (d) => d.source === "system" ? nodeColor(d) : "none")
+      .attr("stroke-width", (d) => d.source === "system" ? 1.5 : 0)
       .attr("opacity", 0.85)
 
     node.append("text")
@@ -155,7 +172,7 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
       .on("mouseenter", (event, d) => {
         const tooltip = tooltipRef.current
         if (!tooltip) return
-        tooltip.textContent = `${d.title}${d.topic ? ` · ${d.topic}` : ""}`
+        tooltip.textContent = `${d.title}${d.entity_type ? ` · ${d.entity_type}` : d.topic ? ` · ${d.topic}` : ""}`
         tooltip.style.opacity = "1"
         tooltip.style.left = `${event.pageX + 12}px`
         tooltip.style.top = `${event.pageY - 8}px`
@@ -220,8 +237,8 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
     // ponytail: small delay so extraction (fire-and-forget after()) has time to write
     const id = setTimeout(async () => {
       const [{ data: notes }, { data: links }] = await Promise.all([
-        supabase.from("vault_notes").select("id, title, topic, path, content_md, intent"),
-        supabase.from("vault_links").select("id, source_note_id, target_note_id, anchor_text"),
+        supabase.from("vault_notes").select("id, title, topic, path, content_md, intent, source, entity_type"),
+        supabase.from("vault_links").select("id, source_note_id, target_note_id, anchor_text, link_type"),
       ])
       if (!notes || !links) return
       setGraphData({
@@ -231,6 +248,7 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
           source: l.source_note_id,
           target: l.target_note_id,
           anchor_text: l.anchor_text,
+          link_type: l.link_type ?? null,
         })),
       })
     }, 4000)
