@@ -32,7 +32,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - RLS enabled on all tables — users can only access their own data
 - Three Supabase clients: `lib/supabase/client.ts` (browser), `lib/supabase/server.ts` (SSR), `lib/supabase/admin.ts` (server-only, bypasses RLS)
 
-## What's been built (as of 2026-06-27, updated session 8)
+## What's been built (as of 2026-06-28, updated session 9)
 - [x] Monorepo scaffold (Turborepo, pnpm, TypeScript)
 - [x] Next.js app scaffolded in apps/web
 - [x] Supabase schema: profiles, vault_notes, vault_links, conversations, messages, extractions
@@ -69,6 +69,11 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - [x] Typewriter speed slowed (52ms → 85ms per word)
 - [x] Dynamic font size in ChatPanel — scales down for longer AI messages (>100 chars, >200 chars breakpoints)
 - [x] /hypesave skill — end-of-session commit + push command
+- [x] Hype__Suggestions.docx reviewed — design proposals for extraction quality, graph structure, advertiser profile (session 9)
+- [x] lib/ai/entityTypes.ts — 5 entity types (item/brand/place/person/event) with tier 1/2/3 parameter stacks; tier 1 completion unlocks vault write (PR #1)
+- [x] checklists.ts refactored — AgendaItem gains weight, tier1_complete, tags fields; CHECKLIST_PROMPT rewritten around tiered priority (tier 1 always, tier 2 naturally, tier 3 only if it comes up) (PR #1)
+- [x] extract.ts — vault paths now entity-type-rooted (item/zara/belt.md); gravity weight system increments each turn (doubles if tier 1 unfilled), flushes at weight≥10; inferred attrs marked *(inferred)* in notes; incomplete nodes get frontmatter flag (PR #1)
+- [x] route.ts — extraction schema updated to entity_type + tags[] (tags emerge from attrs, never assigned upfront); buildAgendaContext soft re-anchor (2–3 turn follow + steer back) replaces hard topic-block; dual-signal intent validation (model flag + forward-looking utterance marker) (PR #1)
 
 ## Claude Code plugins installed (user-scoped, active next session)
 - `context-mode` — keeps large outputs out of context window (was pre-installed)
@@ -78,26 +83,30 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 
 ## START OF NEXT SESSION checklist
 1. Run `git log --oneline -5` to confirm state
-2. Run `cd apps/web && pnpm dev` to start the dev server
-3. Chat: Cerebras gpt-oss-120b (free tier) — CEREBRAS_API_KEY in .env.local
-4. Extraction: Groq llama-3.1-8b-instant — GROQ_API_KEY in .env.local (extraction only, no chat)
-5. To reset everything for testing: `/hypereset` (wipes vault, clears agenda, resets onboarding flag)
-6. Root "You" node is always at path `_profile.md`, topic `Profile` — extraction depends on this
-7. `.mcp.json` is gitignored — Supabase MCP needs `SUPABASE_ACCESS_TOKEN` set locally in the file (not committed)
+2. Merge PR #1 (feat/extraction-overhaul) if not yet merged — extraction quality overhaul
+3. Run `/hypereset` after merging PR #1 — vault paths changed (topic-rooted → entity-type-rooted)
+4. Run `cd apps/web && pnpm dev` to start the dev server
+5. Chat: Cerebras gpt-oss-120b (free tier) — CEREBRAS_API_KEY in .env.local
+6. To reset everything for testing: `/hypereset` (wipes vault, clears agenda, resets onboarding flag)
+7. Root "You" node is always at path `_profile.md`, topic `Profile` — extraction depends on this
+8. `.mcp.json` is gitignored — Supabase MCP needs `SUPABASE_ACCESS_TOKEN` set locally in the file (not committed)
 
-## Key extraction rules (session 5 decisions)
-- Entity-centric graph: Topic → Brand → Item OR Topic → Entity (no category hub layer)
+## Key extraction rules (updated session 9)
+- Entity-centric graph: entity-type hub → Brand hub → Item (vault paths: `item/zara/belt.md`, `place/monmouth-coffee.md`)
+- 5 entity types: item, brand, place, person, event — each has tier 1/2/3 parameter stacks in entityTypes.ts
+- Vault write triggers on tier1_complete (brand + category for items, name + location + frequency for places, etc.) — NOT on all-attrs-filled
+- Gravity agenda: each pending AgendaItem carries a weight (increments each turn; doubles if tier 1 unfilled); flushes at weight≥10 with incomplete: true frontmatter — soft decay replaces old 5-turn hard cutoff
+- Inferred attributes allowed with `inferred: true` flag + source_utterance ("I go there every Sunday" → Frequency: weekly, inferred)
+- Tags emerge from extracted attributes post-extraction — never assigned upfront; open-ended tag set
+- topics.ts still present for graph display use; no longer drives extraction classification
 - "You" node is isolated — visual anchor only, no outgoing links from extraction
-- Graph structure: topics float freely as independent clusters
 - **Durability rule**: owned items, preferred brands, frequent places, recurring relationships
-- **No inference**: never derive from implication
-- **No pattern from single instance**: routine requires explicit frequency
+- **No pattern from single instance**: routine requires explicit frequency (unless inferred with flag)
 - Places and people mentioned in passing ARE extracted (become pending agenda threads)
-- Brand nodes: source="system", no required attributes
-- Item/entity nodes: source="conversation", required attributes checked against checklists.ts
+- Brand nodes: source="system"; item/entity nodes: source="conversation"
 
-## Key interviewer rules (session 7–8 decisions)
-- Agenda injected every turn: current entity + pending threads, AI blocked from topic changes until current is resolved
+## Key interviewer rules (updated session 9)
+- Agenda injected every turn: current entity + pending threads; AI follows user pivots naturally for 2–3 turns then re-anchors ("By the way, back to that [entity]…") — no longer blocks topic changes
 - Natural attribute grouping: color + material + size bundled conversationally ("So how were those shoes? Color, size-wise?")
 - Value rule: never ask yes/no about an attribute — always ask for the specific value; if answer has no concrete value, ask again before moving on
 - Drill-down for clothing: what it is → color + material + size (bundled) → price only if they bring it up
@@ -111,6 +120,8 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - Known-facts list injected to prevent re-asking
 - City/hometown: when user says "my city X" or "I'm from X", confirm as home city and extract as Location entity
 - Onboarding skip: simple ack ("sure", "let's do it") advances one step; only "skip this" / "just start already" jumps to Step 5
+- Intent validation: dual-signal required — model sets intent:true AND utterance contains forward-looking marker (want/need/looking for/planning to/going to get); single-signal is downgraded to false
+- Intent fields: intent_confidence (0–1) and intent_utterance stored alongside intent flag
 
 ## What's NOT done yet (next steps in order)
 1. Landing page — marketing page at / (currently redirects to /signup); lead with "Be in control of your ads" + "Build your personal graph"
@@ -166,9 +177,10 @@ apps/web/
 │   ├── supabase/server.ts          ← SSR client
 │   ├── supabase/admin.ts           ← service role (server-only)
 │   └── ai/
-│       ├── extract.ts              ← entity-centric extraction + agenda update
-│       ├── checklists.ts           ← required attrs per topic, Agenda type, CHECKLIST_PROMPT
-│       ├── topics.ts               ← 31 topics (source of truth)
+│       ├── extract.ts              ← entity-centric extraction + agenda gravity + vault writes
+│       ├── entityTypes.ts          ← 5 entity types with tier 1/2/3 parameter stacks (source of truth for extraction)
+│       ├── checklists.ts           ← AgendaItem/Agenda types, CHECKLIST_PROMPT (tiered)
+│       ├── topics.ts               ← 31 topics (used for tags + graph display, not extraction classification)
 │       └── categories.ts           ← topic → subcategories map (kept, not used in routing)
 ├── types/database.ts               ← all TypeScript types
 └── supabase/schema.sql             ← full DB schema
