@@ -216,7 +216,7 @@ export default function ChatPanel({ userId, userName: _userName, onReply }: { us
                 onFocus={() => setFocused(true)}
                 onBlur={() => setFocused(false)}
                 disabled={!canInput}
-                placeholder={canInput ? "your answer…" : ""}
+                placeholder={canInput ? "your answer… [notes in brackets]" : ""}
                 autoComplete="off"
                 spellCheck={false}
                 className="select-auto"

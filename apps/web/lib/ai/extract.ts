@@ -26,6 +26,10 @@ function attrsToContentMd(attrs: Attr[]): string {
 
 function makeAgendaItem(entity: RawEntity): AgendaItem {
   const seedAttrs = entity.attributes ?? []
+  // Synthesize Brand attr from entity.brand so getTier1Missing sees it as fulfilled
+  if (entity.brand && !seedAttrs.some((a) => a.title === "Brand")) {
+    seedAttrs.unshift({ title: "Brand", value: entity.brand })
+  }
   const seedMd = attrsToContentMd(seedAttrs)
   const tags = entity.tags?.length ? entity.tags : entity.topic ? [entity.topic] : []
   const tier1Missing = getTier1Missing(entity.entity_type as EntityType, seedMd)
@@ -183,6 +187,8 @@ export async function extractFacts(
     const existingKeys = new Set(agenda.current.attributes.map((a) => a.title))
     for (const attr of extraction.attributes) {
       if (!existingKeys.has(attr.title)) agenda.current.attributes.push(attr)
+      // Sync brand attr to agenda.current.brand so vault path is correct
+      if (attr.title === "Brand" && !agenda.current.brand) agenda.current.brand = attr.value
     }
   }
 

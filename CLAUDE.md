@@ -32,7 +32,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - RLS enabled on all tables — users can only access their own data
 - Three Supabase clients: `lib/supabase/client.ts` (browser), `lib/supabase/server.ts` (SSR), `lib/supabase/admin.ts` (server-only, bypasses RLS)
 
-## What's been built (as of 2026-06-28, updated session 9 cont.)
+## What's been built (as of 2026-06-28, updated session 10)
 - [x] Monorepo scaffold (Turborepo, pnpm, TypeScript)
 - [x] Next.js app scaffolded in apps/web
 - [x] Supabase schema: profiles, vault_notes, vault_links, conversations, messages, extractions
@@ -78,6 +78,10 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - [x] Phase 4 — attribute-based edges: linkByTag() creates shared-topic edges (link_type='tag') between conversation nodes; brand→item edges carry link_type='brand' (PR #2)
 - [x] Phase 4 — GraphCanvas visual overhaul: TOPIC_COLORS expanded to all 31 topics (fixes gray node bug); ENTITY_TYPE_COLORS added (5 types); entity nodes colored by entity_type, system hubs by topic; system nodes render as hollow rings; tag edges barely-visible white, brand edges faint purple; tooltip shows entity_type (PR #2)
 - [x] Supabase schema: vault_notes.entity_type + vault_links.link_type columns added + migrations applied (PR #2)
+- [x] Reviewer annotation feature — `[notes in brackets]` in chat input stripped before LLM call, stored raw in Supabase messages for session review; placeholder hint added (session 10)
+- [x] Extraction bug fixes (session 10) — brand attr synced to agenda.current.brand when it arrives mid-drill; makeAgendaItem synthesizes Brand attr from entity.brand so getTier1Missing sees it fulfilled; attribute bleed from current entity fixed via prompt CRITICAL rule (new entity introduction → attrs go to entity seed, not global slot)
+- [x] Interviewer behavior fixes (session 10) — "I don't know" dead-end rule (rephrase once max, then drop); open-ended wrap-up after 4+ attrs ("anything else?"); casual mention rule (don't pivot immediately on passing mention, finish current drill first)
+- [x] Session lifecycle (session 10) — conversations.updated_at auto-trigger (Postgres); 2h timeout detected on opening request → old conversation closed, pending queue + current entity carried to new conversation; incomplete vault_notes injected into system prompt as "Unfinished from last session"; session topic limit (3 entities per conversation) with wrap-up instruction; farewell detection ("Talk soon." etc.) closes conversation immediately
 
 ## Claude Code plugins installed (user-scoped, active next session)
 - `context-mode` — keeps large outputs out of context window (was pre-installed)
@@ -86,7 +90,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - `ponytail` — prevents over-engineering, enforces minimum viable code
 
 ## START OF NEXT SESSION checklist
-1. Run `git log --oneline -5` to confirm state — PRs #1 and #2 should both be merged
+1. Run `git log --oneline -5` to confirm state
 2. Run `cd apps/web && pnpm dev` to start the dev server
 3. Chat: Cerebras gpt-oss-120b (free tier) — CEREBRAS_API_KEY in .env.local
 4. To reset everything for testing: `/hypereset` (wipes vault, clears agenda, resets onboarding flag)

@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server"
 import { extractFacts, type ExtractionResult } from "@/lib/ai/extract"
 import { TOPICS } from "@/lib/ai/topics"
 import { CHECKLIST_PROMPT, type Agenda } from "@/lib/ai/checklists"
-import { getTier1Missing } from "@/lib/ai/entityTypes"
+import { getTier1Missing, type EntityType } from "@/lib/ai/entityTypes"
 
 // ponytail: fetch over SDK — no new dep, one URL to swap providers
 const CHAT_URL = "https://api.cerebras.ai/v1/chat/completions"
@@ -66,6 +66,10 @@ Critical attribute rule: never ask a yes/no question for a value you need.
 ✓ "What size did you end up getting?"
 ✗ "Did you get the right size?" — "yes" tells you nothing. If their answer has no concrete value, ask for the actual value before moving on.
 
+"I don't know" / "I'm not sure" rule: if the user says they don't know or aren't sure about something, rephrase once at most, then drop it and move on. Do NOT ask for the same attribute a third time. Two misses = skip it entirely.
+
+Open-ended wrap-up: after collecting several attributes on an entity (4+), before moving to a new topic, offer one open-ended question: "Anything else worth noting about it?" or "Anything else stand out about [thing]?" — then move on regardless of the answer.
+
 ${CHECKLIST_PROMPT}
 
 ## Dead-end detection — when to pivot
@@ -76,6 +80,8 @@ Move on when ANY of these fires:
 - A topic has produced no new extractable facts in 3 turns
 
 When pivoting, do not announce it. Simply ask about something different.
+
+Casual mention rule: if the user mentions a new entity in passing while answering about the current one (e.g. "I got it in my hometown of Viareggio"), do NOT immediately pivot to the new entity. Note it mentally (it will be queued), finish the current drill-down or offer the open-ended wrap-up first, then transition naturally: "Nice — and you mentioned Viareggio, is that where you're from?"
 
 ## Session lifecycle
 
@@ -120,7 +126,8 @@ You're an AI — don't pretend otherwise if asked. But don't volunteer it either
   }
 }
 
-extraction.attributes: concrete values stated THIS TURN about the entity already being tracked (the one in the active agenda). Use this ONLY when drilling down on an existing entity — not when introducing a new one.
+extraction.attributes: concrete values stated THIS TURN about the entity already being tracked (the one in the active agenda). Use this ONLY when drilling down on an existing agenda entity.
+  CRITICAL: if the user introduced a brand-new topic/thing this turn (not a detail about the current agenda entity), extraction.attributes MUST be [] — put everything in extraction.entities[].attributes. Exception: if the user is answering a direct question about the current agenda entity (e.g. you asked "what brand is your laptop?" and they answered "Huawei"), that IS an attribute of the current entity — put it in extraction.attributes, not extraction.entities. Never split attrs across both.
   Each: { "title": "Color", "value": "black" }
   If the value was implied rather than stated directly (e.g. "I go there every Sunday" implies weekly frequency), add: "inferred": true, "source_utterance": "I go there every Sunday"
   Empty array [] if the user introduced a new entity this turn, or no concrete value was stated.
@@ -222,14 +229,17 @@ export async function POST(req: NextRequest) {
   }
 
   const today = new Date().toISOString().split("T")[0]
+  const TWO_HOURS_MS = 2 * 60 * 60 * 1000
+  const isOpeningMessage = messages.length === 0
 
   // Fetch conversation first (needed for agenda)
   let conversationId: string
   let agenda: Agenda = { current: null, pending: [] }
+  let isNewSession = false
 
   const { data: existing } = await supabase
     .from("conversations")
-    .select("id, agenda")
+    .select("id, agenda, updated_at")
     .eq("user_id", user.id)
     .eq("status", "active")
     .order("created_at", { ascending: false })
@@ -237,27 +247,43 @@ export async function POST(req: NextRequest) {
     .single()
 
   if (existing) {
-    conversationId = existing.id
-    agenda = (existing.agenda as Agenda) ?? { current: null, pending: [] }
+    const stale = isOpeningMessage && Date.now() - new Date(existing.updated_at).getTime() > TWO_HOURS_MS
+    if (stale) {
+      // New session: close old conversation, carry current + pending queue forward
+      const oldAgenda = (existing.agenda as Agenda) ?? { current: null, pending: [] }
+      const carryover = [...(oldAgenda.pending ?? []), ...(oldAgenda.current ? [{ ...oldAgenda.current, turns: 0, weight: 1 }] : [])]
+      await supabase.from("conversations").update({ status: "completed" }).eq("id", existing.id)
+      const { data: created } = await supabase
+        .from("conversations")
+        .insert({ user_id: user.id, agenda: { current: null, pending: carryover } })
+        .select("id")
+        .single()
+      conversationId = created!.id
+      agenda = { current: null, pending: carryover }
+      isNewSession = true
+    } else {
+      conversationId = existing.id
+      agenda = (existing.agenda as Agenda) ?? { current: null, pending: [] }
+    }
   } else {
     const { data: created } = await supabase
       .from("conversations")
       .insert({ user_id: user.id })
-      .select("id, agenda")
+      .select("id")
       .single()
     conversationId = created!.id
   }
 
-  const [{ data: vaultNotes }, { data: todayEvents }, { data: profile }] = await Promise.all([
+  const [{ data: vaultNotes }, { data: todayEvents }, { data: profile }, { count: topicsThisSession }] = await Promise.all([
     supabase
       .from("vault_notes")
-      .select("title, topic, content_md")
+      .select("title, topic, content_md, entity_type")
       .eq("user_id", user.id)
       .order("updated_at", { ascending: false })
       .limit(20),
     supabase
       .from("vault_notes")
-      .select("title, topic, content_md")
+      .select("title, topic, content_md, entity_type")
       .eq("user_id", user.id)
       .eq("scheduled_for", today),
     supabase
@@ -265,6 +291,10 @@ export async function POST(req: NextRequest) {
       .select("display_name, onboarded")
       .eq("id", user.id)
       .single(),
+    supabase
+      .from("extractions")
+      .select("*", { count: "exact", head: true })
+      .eq("conversation_id", conversationId),
   ])
 
   const isOnboarding = profile?.onboarded === false
@@ -283,13 +313,29 @@ export async function POST(req: NextRequest) {
     ? `\n\n## Scheduled for today:\n${todayEvents.map((e) => `- ${e.title}${e.topic ? ` (${e.topic})` : ""}`).join("\n")}\nOpen with one of these if it likely already happened, or wish them well if upcoming.`
     : ""
 
+  const incompleteThreads = (vaultNotes ?? [])
+    .filter((n) => n.entity_type && n.content_md?.includes("incomplete: true"))
+    .map((n) => {
+      const missing = getTier1Missing(n.entity_type as EntityType, n.content_md ?? "")
+      return `- ${n.title} (${n.entity_type})${missing.length ? `: still need ${missing.join(", ")}` : " — tier 1 complete, could use more detail"}`
+    })
+    .join("\n")
+
+  const sessionTopicCount = topicsThisSession ?? 0
+  const sessionContext = sessionTopicCount >= 3
+    ? `## Session depth: ${sessionTopicCount} entities captured this session. After wrapping the current entity, close naturally — "That's a good amount for today — we can pick up the rest next time." Do not start new entities after this.`
+    : `## Session depth: ${sessionTopicCount} of 3 entities captured this session.`
+
   const systemPrompt = isOnboarding
     ? ONBOARDING_PROMPT.replace("[name]", profile?.display_name ?? "there")
     : [
         SYSTEM_PROMPT,
         vaultContext ? `## What you already know about this person:\n${vaultContext}` : "",
         knownFacts ? `## Already captured — do NOT re-ask:\n${knownFacts}` : "",
+        incompleteThreads ? `## Unfinished from last session — pick these up naturally when relevant:\n${incompleteThreads}` : "",
+        isNewSession && agenda.pending.length ? `## Carried over from last session — these were queued but not reached:\n${agenda.pending.map((p) => `- ${p.title} (${p.entity_type})`).join("\n")}` : "",
         todayContext,
+        sessionContext,
         buildAgendaContext(agenda),
       ].filter(Boolean).join("\n\n")
 
@@ -301,7 +347,11 @@ export async function POST(req: NextRequest) {
       max_tokens: 2000,
       messages: [
         { role: "system", content: systemPrompt },
-        ...messages.map((m) => ({ role: m.role, content: m.content })),
+        ...messages.map((m) => ({
+          role: m.role,
+          // strip [reviewer annotations] — stored raw in DB, invisible to LLM
+          content: m.role === "user" ? m.content.replace(/\[.*?\]/g, "").trim() : m.content,
+        })),
       ],
     }),
   })
@@ -353,6 +403,8 @@ export async function POST(req: NextRequest) {
     return hasMarker ? e : { ...e, intent: false, intent_confidence: 0 }
   })
 
+  const isFarewell = /\bTalk soon\b|\blet's leave it there\b|\bcatch up tomorrow\b/i.test(reply)
+
   const lastUserMsg = messages.findLast((m) => m.role === "user")
   if (lastUserMsg && conversationId) {
     await supabase.from("messages").insert([
@@ -361,6 +413,9 @@ export async function POST(req: NextRequest) {
     ])
     if (onboardingComplete) {
       await supabase.from("profiles").update({ onboarded: true }).eq("id", user.id)
+    }
+    if (isFarewell) {
+      await supabase.from("conversations").update({ status: "completed" }).eq("id", conversationId)
     }
     after(() =>
       extractFacts(conversationId, user.id, extraction).catch((err) =>

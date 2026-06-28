@@ -151,3 +151,16 @@ CREATE INDEX IF NOT EXISTS idx_conversations_user  ON public.conversations(user_
 
 ALTER TABLE public.vault_notes ADD COLUMN IF NOT EXISTS entity_type TEXT;
 ALTER TABLE public.vault_links ADD COLUMN IF NOT EXISTS link_type TEXT DEFAULT 'brand';
+
+-- Auto-update conversations.updated_at on any row change (needed for session timeout detection)
+CREATE OR REPLACE FUNCTION public.handle_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER conversations_updated_at
+  BEFORE UPDATE ON public.conversations
+  FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
