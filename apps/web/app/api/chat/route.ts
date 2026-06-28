@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server"
 import { extractFacts, type ExtractionResult } from "@/lib/ai/extract"
 import { TOPICS } from "@/lib/ai/topics"
 import { CHECKLIST_PROMPT, type Agenda } from "@/lib/ai/checklists"
+import { getTier1Missing } from "@/lib/ai/entityTypes"
 
 // ponytail: fetch over SDK — no new dep, one URL to swap providers
 const CHAT_URL = "https://api.cerebras.ai/v1/chat/completions"
@@ -110,9 +111,6 @@ Sensitive personal topics (health struggles, relationship problems):
 ## Identity
 You're an AI — don't pretend otherwise if asked. But don't volunteer it either. Keep it brief: "Yeah, I'm an AI — but I'm mostly here to learn about you." Then move on.
 
-## Topics to explore over time — don't rush, one session covers one thread:
-${TOPICS.map((t) => `- ${t}`).join("\n")}
-
 ## Response format — ALWAYS return valid JSON only. No other text before or after.
 {
   "reply": "your message to the user",
@@ -124,14 +122,30 @@ ${TOPICS.map((t) => `- ${t}`).join("\n")}
 
 extraction.attributes: concrete values stated THIS TURN about the entity already being tracked (the one in the active agenda). Use this ONLY when drilling down on an existing entity — not when introducing a new one.
   Each: { "title": "Color", "value": "black" }
+  If the value was implied rather than stated directly (e.g. "I go there every Sunday" implies weekly frequency), add: "inferred": true, "source_utterance": "I go there every Sunday"
   Empty array [] if the user introduced a new entity this turn, or no concrete value was stated.
 
 extraction.entities: NEW things mentioned that are not in the known facts list — purchases, places, people, events, brands.
-  Each: { "title": "Belt", "topic": "Style", "brand": "Zara", "entity_type": "item", "intent": false, "scheduled_for": null, "description": "one-sentence summary", "attributes": [] }
-  entity_type: "item" | "brand" | "place" | "event" | "person"
-  topic: MUST be exactly one of: Identity, Location, Relationships, Routine, Work, Health, Food, Entertainment, Style, Hobbies, Travel, Goals, Technology, Education, Home, Childhood, Community, Pets, Creativity, Finance, Beliefs, Social, Life Events, Parenting, Vehicle, Real Estate, Beauty, Sports, Events, Gaming, Life Stage
+  Each: {
+    "title": "Belt",
+    "entity_type": "item",
+    "tags": ["Style"],
+    "brand": "Zara",
+    "intent": false,
+    "intent_confidence": 0.0,
+    "intent_utterance": "",
+    "scheduled_for": null,
+    "description": "one-sentence summary",
+    "attributes": []
+  }
+  entity_type: MUST be exactly one of: "item" | "brand" | "place" | "event" | "person"
+  tags: 1–2 topic labels that best describe this entity. MUST each be exactly one of: ${TOPICS.join(", ")}
   title: the specific thing ("Belt" not "bought a belt")
+  intent: true only if the user expressed a forward-looking desire to acquire/do this thing (want, need, looking for, planning to, going to get). False for things already owned or just mentioned.
+  intent_confidence: 0.0–1.0 — how confident you are this is genuine purchase/action intent
+  intent_utterance: the exact phrase that signals intent (empty string if intent: false)
   attributes: concrete values stated about THIS entity in the same turn — e.g. if user says "a black leather belt from Zara", attributes=[{title:"Color",value:"black"},{title:"Material",value:"leather"}]
+  For inferred attribute values add: "inferred": true, "source_utterance": "..."
   Capture places and people mentioned in passing too.`
 
 const ONBOARDING_PROMPT = `You are welcoming a new user to their personal vault for the first time. Walk them through what this is, one short message at a time, waiting for their acknowledgment before continuing.
@@ -173,20 +187,19 @@ function buildAgendaContext(agenda: Agenda): string {
   if (!agenda.current) return ""
 
   const curr = agenda.current
+  const tier1Missing = getTier1Missing(curr.entity_type, curr.attributes.map((a) => `- **${a.title}**: ${a.value}`).join("\n"))
+
   const lines = [
-    "## Active agenda — follow this strictly:",
+    "## Active agenda — guide (not gate):",
     "",
-    `CURRENT ENTITY: **${curr.title}** (${curr.topic})`,
-    `Still missing: ${curr.missing.join(", ")}`,
-    `→ Collect these before changing topic. Group related ones naturally where possible.`,
+    `HIGHEST PRIORITY: **${curr.title}** (${curr.entity_type})${tier1Missing.length ? ` — still need tier 1: ${tier1Missing.join(", ")}` : " — tier 1 complete"}`,
+    `→ If the user pivots to another topic, follow them naturally for 2–3 turns, then re-anchor: "By the way, I wanted to come back to that ${curr.title}…"`,
   ]
 
   if (agenda.pending.length) {
-    const pendingList = agenda.pending.map((p) => `${p.title} (${p.topic})`).join(", ")
-    lines.push("", `PENDING — pick up after current is complete: ${pendingList}`)
+    const pendingList = agenda.pending.map((p) => `${p.title} (${p.entity_type})`).join(", ")
+    lines.push("", `PENDING — pick up when current is done: ${pendingList}`)
   }
-
-  lines.push("", "Do not explore unrelated topics until all agenda items are resolved.")
 
   return lines.join("\n")
 }
@@ -330,6 +343,15 @@ export async function POST(req: NextRequest) {
       console.log("[chat] JSON parse failed, using raw as reply")
     }
   }
+
+  // Dual-signal intent validation: require both model flag AND a forward-looking marker in the utterance
+  const INTENT_MARKERS = ["want", "need", "looking for", "thinking about getting", "planning to", "going to get"]
+  extraction.entities = extraction.entities.map((e) => {
+    if (!e.intent) return e
+    const utterance = (e.intent_utterance ?? "").toLowerCase()
+    const hasMarker = INTENT_MARKERS.some((m) => utterance.includes(m))
+    return hasMarker ? e : { ...e, intent: false, intent_confidence: 0 }
+  })
 
   const lastUserMsg = messages.findLast((m) => m.role === "user")
   if (lastUserMsg && conversationId) {
