@@ -1,13 +1,17 @@
 import { createAdminClient } from "@/lib/supabase/admin"
 import { getMissingAttrs, type Agenda, type AgendaItem } from "./checklists"
+import { getTier1Missing, type EntityType } from "./entityTypes"
 
-export type Attr = { title: string; value: string }
+export type Attr = { title: string; value: string; inferred?: boolean }
 export type RawEntity = {
   title: string
   topic: string
   brand: string | null
   entity_type: "item" | "brand" | "place" | "event" | "person"
+  tags: string[]
   intent: boolean
+  intent_confidence?: number
+  intent_utterance?: string
   scheduled_for: string | null
   description: string
   attributes?: Attr[]
@@ -16,26 +20,29 @@ export type ExtractionResult = { attributes: Attr[]; entities: RawEntity[] }
 
 const toSlug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
 
-// ponytail: flush after this many turns if entity still incomplete — avoids needing an explicit abandon signal
-const ABANDON_AFTER_TURNS = 5
-
 function attrsToContentMd(attrs: Attr[]): string {
-  return attrs.map((a) => `- **${a.title}**: ${a.value}`).join("\n")
+  return attrs.map((a) => `- **${a.title}**: ${a.value}${a.inferred ? " *(inferred)*" : ""}`).join("\n")
 }
 
 function makeAgendaItem(entity: RawEntity): AgendaItem {
   const seedAttrs = entity.attributes ?? []
+  const seedMd = attrsToContentMd(seedAttrs)
+  const tags = entity.tags?.length ? entity.tags : entity.topic ? [entity.topic] : []
+  const tier1Missing = getTier1Missing(entity.entity_type as EntityType, seedMd)
   return {
     title: entity.title,
-    topic: entity.topic,
+    topic: tags[0] ?? entity.entity_type,
     brand: entity.brand ?? null,
-    entity_type: entity.entity_type,
+    entity_type: entity.entity_type as EntityType,
     intent: entity.intent ?? false,
     scheduled_for: entity.scheduled_for ?? null,
     description: entity.description ?? "",
-    missing: getMissingAttrs(entity.topic, seedAttrs.map(a => `- **${a.title}**: ${a.value}`).join("\n")),
+    missing: tier1Missing,
     attributes: seedAttrs,
     turns: 0,
+    weight: 1,
+    tier1_complete: tier1Missing.length === 0,
+    tags,
   }
 }
 
@@ -45,39 +52,41 @@ async function writeEntityToVault(
   conversationId: string,
   item: AgendaItem
 ) {
-  const topicDir = toSlug(item.topic)
+  const entityDir = item.entity_type
+  const primaryTopic = item.tags[0] ?? item.entity_type
 
-  const { data: topicHub } = await supabase
+  const { data: typeHub } = await supabase
     .from("vault_notes")
     .upsert(
-      { user_id: userId, path: `${topicDir}/index.md`, title: item.topic, topic: item.topic, content_md: "", source: "system", confidence: 1 },
+      { user_id: userId, path: `${entityDir}/index.md`, title: item.entity_type, topic: primaryTopic, content_md: "", source: "system", confidence: 1 },
       { onConflict: "user_id,path" }
     )
     .select("id")
     .single()
 
-  if (!topicHub) return
+  if (!typeHub) return
 
-  const attrLines = item.attributes.map((a) => `- **${a.title}**: ${a.value}`)
-  const fullContent = [item.description, attrLines.join("\n")].filter(Boolean).join("\n\n")
+  const incompleteHeader = item.tier1_complete ? "" : "---\nincomplete: true\n---\n\n"
+  const attrLines = attrsToContentMd(item.attributes)
+  const fullContent = incompleteHeader + [item.description, attrLines].filter(Boolean).join("\n\n")
 
   if (!item.brand) {
-    const entityPath = `${topicDir}/${toSlug(item.title)}.md`
+    const entityPath = `${entityDir}/${toSlug(item.title)}.md`
     const { data: entityNote } = await supabase
       .from("vault_notes")
       .upsert(
-        { user_id: userId, path: entityPath, title: item.title, topic: item.topic, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8 },
+        { user_id: userId, path: entityPath, title: item.title, topic: primaryTopic, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8 },
         { onConflict: "user_id,path" }
       )
       .select("id")
       .single()
     if (!entityNote) return
-    await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: topicHub.id, target_note_id: entityNote.id }, { onConflict: "source_note_id,target_note_id" })
+    await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: typeHub.id, target_note_id: entityNote.id }, { onConflict: "source_note_id,target_note_id" })
     await supabase.from("extractions").insert({ conversation_id: conversationId, note_id: entityNote.id })
     return
   }
 
-  const brandPath = `${topicDir}/${toSlug(item.brand)}.md`
+  const brandPath = `${entityDir}/${toSlug(item.brand)}.md`
 
   if (item.entity_type === "brand") {
     const { data: existing } = await supabase.from("vault_notes").select("id, content_md").eq("user_id", userId).eq("path", brandPath).maybeSingle()
@@ -86,38 +95,38 @@ async function writeEntityToVault(
         const updated = existing.content_md ? `${existing.content_md}\n- ${item.description}` : `- ${item.description}`
         await supabase.from("vault_notes").update({ content_md: updated }).eq("id", existing.id)
       }
-      await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: topicHub.id, target_note_id: existing.id }, { onConflict: "source_note_id,target_note_id" })
+      await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: typeHub.id, target_note_id: existing.id }, { onConflict: "source_note_id,target_note_id" })
     } else {
       const { data: brandNote } = await supabase
         .from("vault_notes")
-        .insert({ user_id: userId, path: brandPath, title: item.brand, topic: item.topic, content_md: `- ${item.description}`, source: "system", confidence: 1 })
+        .insert({ user_id: userId, path: brandPath, title: item.brand, topic: primaryTopic, content_md: `- ${item.description}`, source: "system", confidence: 1 })
         .select("id")
         .single()
       if (!brandNote) return
-      await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: topicHub.id, target_note_id: brandNote.id }, { onConflict: "source_note_id,target_note_id" })
+      await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: typeHub.id, target_note_id: brandNote.id }, { onConflict: "source_note_id,target_note_id" })
       await supabase.from("extractions").insert({ conversation_id: conversationId, note_id: brandNote.id })
     }
     return
   }
 
-  // Topic → Brand → Item
+  // Type hub → Brand hub → Item
   const { data: brandHub } = await supabase
     .from("vault_notes")
     .upsert(
-      { user_id: userId, path: brandPath, title: item.brand, topic: item.topic, content_md: "", source: "system", confidence: 1 },
+      { user_id: userId, path: brandPath, title: item.brand, topic: primaryTopic, content_md: "", source: "system", confidence: 1 },
       { onConflict: "user_id,path" }
     )
     .select("id")
     .single()
   if (!brandHub) return
 
-  await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: topicHub.id, target_note_id: brandHub.id }, { onConflict: "source_note_id,target_note_id" })
+  await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: typeHub.id, target_note_id: brandHub.id }, { onConflict: "source_note_id,target_note_id" })
 
-  const entityPath = `${topicDir}/${toSlug(item.brand)}/${toSlug(item.title)}.md`
+  const entityPath = `${entityDir}/${toSlug(item.brand)}/${toSlug(item.title)}.md`
   const { data: entityNote } = await supabase
     .from("vault_notes")
     .upsert(
-      { user_id: userId, path: entityPath, title: item.title, topic: item.topic, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8 },
+      { user_id: userId, path: entityPath, title: item.title, topic: primaryTopic, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8 },
       { onConflict: "user_id,path" }
     )
     .select("id")
@@ -142,6 +151,9 @@ export async function extractFacts(
   if (agenda.current) {
     agenda.current.attributes ??= []
     agenda.current.turns ??= 0
+    agenda.current.weight ??= 1
+    agenda.current.tier1_complete ??= false
+    agenda.current.tags ??= []
   }
 
   const { data: vaultNotes } = await supabase.from("vault_notes").select("title").eq("user_id", userId).eq("source", "conversation")
@@ -161,10 +173,19 @@ export async function extractFacts(
 
   if (agenda.current) {
     agenda.current.turns += 1
-    agenda.current.missing = getMissingAttrs(agenda.current.topic, attrsToContentMd(agenda.current.attributes))
 
-    if (agenda.current.missing.length === 0 || agenda.current.turns >= ABANDON_AFTER_TURNS) {
+    // Gravity: increment weight each turn, double penalty if tier 1 still incomplete
+    const contentMd = attrsToContentMd(agenda.current.attributes)
+    const tier1Missing = getTier1Missing(agenda.current.entity_type, contentMd)
+    agenda.current.tier1_complete = tier1Missing.length === 0
+    agenda.current.missing = tier1Missing
+    agenda.current.weight += 1
+    if (!agenda.current.tier1_complete) agenda.current.weight += 1
+
+    if (agenda.current.tier1_complete || agenda.current.weight >= 10) {
       await writeEntityToVault(supabase, userId, conversationId, agenda.current)
+      // Sort pending by weight descending before promoting
+      agenda.pending.sort((a, b) => (b.weight ?? 1) - (a.weight ?? 1))
       agenda.current = agenda.pending.shift() ?? null
     }
   }
