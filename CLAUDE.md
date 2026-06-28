@@ -32,7 +32,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - RLS enabled on all tables — users can only access their own data
 - Three Supabase clients: `lib/supabase/client.ts` (browser), `lib/supabase/server.ts` (SSR), `lib/supabase/admin.ts` (server-only, bypasses RLS)
 
-## What's been built (as of 2026-06-28, updated session 9)
+## What's been built (as of 2026-06-28, updated session 9 cont.)
 - [x] Monorepo scaffold (Turborepo, pnpm, TypeScript)
 - [x] Next.js app scaffolded in apps/web
 - [x] Supabase schema: profiles, vault_notes, vault_links, conversations, messages, extractions
@@ -74,6 +74,10 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - [x] checklists.ts refactored — AgendaItem gains weight, tier1_complete, tags fields; CHECKLIST_PROMPT rewritten around tiered priority (tier 1 always, tier 2 naturally, tier 3 only if it comes up) (PR #1)
 - [x] extract.ts — vault paths now entity-type-rooted (item/zara/belt.md); gravity weight system increments each turn (doubles if tier 1 unfilled), flushes at weight≥10; inferred attrs marked *(inferred)* in notes; incomplete nodes get frontmatter flag (PR #1)
 - [x] route.ts — extraction schema updated to entity_type + tags[] (tags emerge from attrs, never assigned upfront); buildAgendaContext soft re-anchor (2–3 turn follow + steer back) replaces hard topic-block; dual-signal intent validation (model flag + forward-looking utterance marker) (PR #1)
+- [x] Phase 4 — hub node removal: type hub nodes (item/index.md etc.) eliminated; entities write directly to vault; entity_type stored on vault_notes (PR #2)
+- [x] Phase 4 — attribute-based edges: linkByTag() creates shared-topic edges (link_type='tag') between conversation nodes; brand→item edges carry link_type='brand' (PR #2)
+- [x] Phase 4 — GraphCanvas visual overhaul: TOPIC_COLORS expanded to all 31 topics (fixes gray node bug); ENTITY_TYPE_COLORS added (5 types); entity nodes colored by entity_type, system hubs by topic; system nodes render as hollow rings; tag edges barely-visible white, brand edges faint purple; tooltip shows entity_type (PR #2)
+- [x] Supabase schema: vault_notes.entity_type + vault_links.link_type columns added + migrations applied (PR #2)
 
 ## Claude Code plugins installed (user-scoped, active next session)
 - `context-mode` — keeps large outputs out of context window (was pre-installed)
@@ -82,14 +86,13 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - `ponytail` — prevents over-engineering, enforces minimum viable code
 
 ## START OF NEXT SESSION checklist
-1. Run `git log --oneline -5` to confirm state
-2. Merge PR #1 (feat/extraction-overhaul) if not yet merged — extraction quality overhaul
-3. Run `/hypereset` after merging PR #1 — vault paths changed (topic-rooted → entity-type-rooted)
-4. Run `cd apps/web && pnpm dev` to start the dev server
-5. Chat: Cerebras gpt-oss-120b (free tier) — CEREBRAS_API_KEY in .env.local
-6. To reset everything for testing: `/hypereset` (wipes vault, clears agenda, resets onboarding flag)
-7. Root "You" node is always at path `_profile.md`, topic `Profile` — extraction depends on this
-8. `.mcp.json` is gitignored — Supabase MCP needs `SUPABASE_ACCESS_TOKEN` set locally in the file (not committed)
+1. Run `git log --oneline -5` to confirm state — PRs #1 and #2 should both be merged
+2. Run `cd apps/web && pnpm dev` to start the dev server
+3. Chat: Cerebras gpt-oss-120b (free tier) — CEREBRAS_API_KEY in .env.local
+4. To reset everything for testing: `/hypereset` (wipes vault, clears agenda, resets onboarding flag)
+5. Root "You" node is always at path `_profile.md`, topic `Profile` — extraction depends on this
+6. `.mcp.json` is gitignored — Supabase MCP needs `SUPABASE_ACCESS_TOKEN` set locally in the file (not committed)
+7. Next focus: landing page at / ("Be in control of your ads" + "Build your personal graph"), then Vercel deploy
 
 ## Key extraction rules (updated session 9)
 - Entity-centric graph: entity-type hub → Brand hub → Item (vault paths: `item/zara/belt.md`, `place/monmouth-coffee.md`)
