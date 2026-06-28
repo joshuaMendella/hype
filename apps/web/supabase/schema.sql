@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS public.vault_notes (
   content_md  TEXT DEFAULT '',
   confidence  FLOAT DEFAULT 0.8,   -- 0–1: how certain the AI is about this info
   source      TEXT DEFAULT 'conversation', -- conversation | inferred | user-confirmed | system
+  entity_type TEXT,                        -- "item" | "brand" | "place" | "person" | "event" | null (system nodes)
   created_at  TIMESTAMPTZ DEFAULT NOW(),
   updated_at  TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(user_id, path)
@@ -34,6 +35,7 @@ CREATE TABLE IF NOT EXISTS public.vault_links (
   source_note_id   UUID REFERENCES public.vault_notes(id) ON DELETE CASCADE NOT NULL,
   target_note_id   UUID REFERENCES public.vault_notes(id) ON DELETE CASCADE NOT NULL,
   anchor_text      TEXT,
+  link_type        TEXT DEFAULT 'brand',   -- "brand" | "tag"
   created_at       TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(source_note_id, target_note_id)
 );
@@ -142,3 +144,10 @@ CREATE INDEX IF NOT EXISTS idx_vault_links_source  ON public.vault_links(source_
 CREATE INDEX IF NOT EXISTS idx_vault_links_target  ON public.vault_links(target_note_id);
 CREATE INDEX IF NOT EXISTS idx_messages_conv       ON public.messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_user  ON public.conversations(user_id);
+
+-- ============================================================
+-- MIGRATIONS (run these in Supabase SQL editor on existing DBs)
+-- ============================================================
+
+ALTER TABLE public.vault_notes ADD COLUMN IF NOT EXISTS entity_type TEXT;
+ALTER TABLE public.vault_links ADD COLUMN IF NOT EXISTS link_type TEXT DEFAULT 'brand';

@@ -55,34 +55,49 @@ async function writeEntityToVault(
   const entityDir = item.entity_type
   const primaryTopic = item.tags[0] ?? item.entity_type
 
-  const { data: typeHub } = await supabase
-    .from("vault_notes")
-    .upsert(
-      { user_id: userId, path: `${entityDir}/index.md`, title: item.entity_type, topic: primaryTopic, content_md: "", source: "system", confidence: 1 },
-      { onConflict: "user_id,path" }
-    )
-    .select("id")
-    .single()
-
-  if (!typeHub) return
-
   const incompleteHeader = item.tier1_complete ? "" : "---\nincomplete: true\n---\n\n"
   const attrLines = attrsToContentMd(item.attributes)
   const fullContent = incompleteHeader + [item.description, attrLines].filter(Boolean).join("\n\n")
+
+  // Create shared-tag edges to other conversation notes with the same topic
+  async function linkByTag(entityNoteId: string) {
+    const { data: peers } = await supabase
+      .from("vault_notes")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("topic", primaryTopic)
+      .eq("source", "conversation")
+      .neq("id", entityNoteId)
+      .order("created_at", { ascending: false })
+      .limit(5)
+
+    if (peers?.length) {
+      await supabase.from("vault_links").upsert(
+        peers.map((p) => ({
+          user_id: userId,
+          source_note_id: entityNoteId,
+          target_note_id: p.id,
+          link_type: "tag",
+          anchor_text: primaryTopic,
+        })),
+        { onConflict: "source_note_id,target_note_id", ignoreDuplicates: true }
+      )
+    }
+  }
 
   if (!item.brand) {
     const entityPath = `${entityDir}/${toSlug(item.title)}.md`
     const { data: entityNote } = await supabase
       .from("vault_notes")
       .upsert(
-        { user_id: userId, path: entityPath, title: item.title, topic: primaryTopic, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8 },
+        { user_id: userId, path: entityPath, title: item.title, topic: primaryTopic, entity_type: item.entity_type, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8 },
         { onConflict: "user_id,path" }
       )
       .select("id")
       .single()
     if (!entityNote) return
-    await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: typeHub.id, target_note_id: entityNote.id }, { onConflict: "source_note_id,target_note_id" })
     await supabase.from("extractions").insert({ conversation_id: conversationId, note_id: entityNote.id })
+    await linkByTag(entityNote.id)
     return
   }
 
@@ -95,46 +110,46 @@ async function writeEntityToVault(
         const updated = existing.content_md ? `${existing.content_md}\n- ${item.description}` : `- ${item.description}`
         await supabase.from("vault_notes").update({ content_md: updated }).eq("id", existing.id)
       }
-      await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: typeHub.id, target_note_id: existing.id }, { onConflict: "source_note_id,target_note_id" })
     } else {
       const { data: brandNote } = await supabase
         .from("vault_notes")
-        .insert({ user_id: userId, path: brandPath, title: item.brand, topic: primaryTopic, content_md: `- ${item.description}`, source: "system", confidence: 1 })
+        .insert({ user_id: userId, path: brandPath, title: item.brand, topic: primaryTopic, entity_type: "brand", content_md: `- ${item.description}`, source: "system", confidence: 1 })
         .select("id")
         .single()
       if (!brandNote) return
-      await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: typeHub.id, target_note_id: brandNote.id }, { onConflict: "source_note_id,target_note_id" })
       await supabase.from("extractions").insert({ conversation_id: conversationId, note_id: brandNote.id })
     }
     return
   }
 
-  // Type hub → Brand hub → Item
+  // Brand hub → Item
   const { data: brandHub } = await supabase
     .from("vault_notes")
     .upsert(
-      { user_id: userId, path: brandPath, title: item.brand, topic: primaryTopic, content_md: "", source: "system", confidence: 1 },
+      { user_id: userId, path: brandPath, title: item.brand, topic: primaryTopic, entity_type: "brand", content_md: "", source: "system", confidence: 1 },
       { onConflict: "user_id,path" }
     )
     .select("id")
     .single()
   if (!brandHub) return
 
-  await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: typeHub.id, target_note_id: brandHub.id }, { onConflict: "source_note_id,target_note_id" })
-
   const entityPath = `${entityDir}/${toSlug(item.brand)}/${toSlug(item.title)}.md`
   const { data: entityNote } = await supabase
     .from("vault_notes")
     .upsert(
-      { user_id: userId, path: entityPath, title: item.title, topic: primaryTopic, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8 },
+      { user_id: userId, path: entityPath, title: item.title, topic: primaryTopic, entity_type: item.entity_type, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8 },
       { onConflict: "user_id,path" }
     )
     .select("id")
     .single()
   if (!entityNote) return
 
-  await supabase.from("vault_links").upsert({ user_id: userId, source_note_id: brandHub.id, target_note_id: entityNote.id }, { onConflict: "source_note_id,target_note_id" })
+  await supabase.from("vault_links").upsert(
+    { user_id: userId, source_note_id: brandHub.id, target_note_id: entityNote.id, link_type: "brand", anchor_text: item.brand },
+    { onConflict: "source_note_id,target_note_id" }
+  )
   await supabase.from("extractions").insert({ conversation_id: conversationId, note_id: entityNote.id })
+  await linkByTag(entityNote.id)
 }
 
 export async function extractFacts(

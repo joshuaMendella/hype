@@ -10,8 +10,8 @@ export default async function GraphPage() {
   if (!user) redirect("/login")
 
   const [{ data: notes }, { data: links }] = await Promise.all([
-    supabase.from("vault_notes").select("id, title, topic, path, content_md, intent"),
-    supabase.from("vault_links").select("id, source_note_id, target_note_id, anchor_text"),
+    supabase.from("vault_notes").select("id, title, topic, path, content_md, intent, source, entity_type"),
+    supabase.from("vault_links").select("id, source_note_id, target_note_id, anchor_text, link_type"),
   ])
 
   const userName: string | null = user.user_metadata?.display_name ?? null
@@ -24,12 +24,15 @@ export default async function GraphPage() {
       path: n.path,
       intent: n.intent ?? false,
       wordCount: n.content_md?.split(" ").length ?? 1,
+      source: n.source ?? "conversation",
+      entity_type: n.entity_type ?? null,
     })),
     links: (links ?? []).map((l) => ({
       id: l.id,
       source: l.source_note_id,
       target: l.target_note_id,
       anchor_text: l.anchor_text,
+      link_type: l.link_type ?? null,
     })),
   }
 
