@@ -1,6 +1,38 @@
 import { createAdminClient } from "@/lib/supabase/admin"
-import { getMissingAttrs, type Agenda, type AgendaItem } from "./checklists"
+import { type Agenda, type AgendaItem } from "./checklists"
 import { getTier1Missing, type EntityType } from "./entityTypes"
+import { affiliateCategory } from "@/lib/ads/categories"
+
+// Intents are the advertiser layer's core signal: cheap to bank now, expensive to
+// reconstruct later. One open row per intent-bearing entity, with an expiry.
+const INTENT_TTL_MS = 30 * 24 * 60 * 60 * 1000 // ponytail: flat 30d; per-category TTL when it matters
+
+async function recordIntent(
+  supabase: ReturnType<typeof createAdminClient>,
+  userId: string,
+  item: AgendaItem,
+  entityNoteId: string
+) {
+  if (!item.intent) return
+  // Don't duplicate an open intent if the entity gets re-written
+  const { data: existing } = await supabase
+    .from("intents")
+    .select("id")
+    .eq("entity_note_id", entityNoteId)
+    .eq("status", "open")
+    .maybeSingle()
+  if (existing) return
+
+  await supabase.from("intents").insert({
+    user_id: userId,
+    entity_note_id: entityNoteId,
+    category: affiliateCategory(item.tags[0] ?? item.entity_type),
+    utterance: item.intent_utterance ?? "",
+    confidence: item.intent_confidence ?? 0,
+    status: "open",
+    expires_at: new Date(Date.now() + INTENT_TTL_MS).toISOString(),
+  })
+}
 
 export type Attr = { title: string; value: string; inferred?: boolean }
 export type RawEntity = {
@@ -39,6 +71,8 @@ function makeAgendaItem(entity: RawEntity): AgendaItem {
     brand: entity.brand ?? null,
     entity_type: entity.entity_type as EntityType,
     intent: entity.intent ?? false,
+    intent_utterance: entity.intent_utterance ?? "",
+    intent_confidence: entity.intent_confidence ?? 0,
     scheduled_for: entity.scheduled_for ?? null,
     description: entity.description ?? "",
     missing: tier1Missing,
@@ -102,6 +136,7 @@ async function writeEntityToVault(
     if (!entityNote) return
     await supabase.from("extractions").insert({ conversation_id: conversationId, note_id: entityNote.id })
     await linkByTag(entityNote.id)
+    await recordIntent(supabase, userId, item, entityNote.id)
     return
   }
 
@@ -154,6 +189,7 @@ async function writeEntityToVault(
   )
   await supabase.from("extractions").insert({ conversation_id: conversationId, note_id: entityNote.id })
   await linkByTag(entityNote.id)
+  await recordIntent(supabase, userId, item, entityNote.id)
 }
 
 export async function extractFacts(

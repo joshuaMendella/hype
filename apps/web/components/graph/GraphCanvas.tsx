@@ -14,24 +14,16 @@ const TOPIC_COLORS: Record<string, string> = {
   Health:         "#4ade80", Sports:       "#34d399", Hobbies:    "#2dd4bf",
   Goals:          "#facc15", Beliefs:      "#eab308", Identity:   "#fde68a",
   Travel:         "#67e8f9", Location:     "#22d3ee",
-  Entertainment:  "#f9a8d4", Gaming:       "#c026d3", Creativity: "#a855f7",
+  Entertainment:  "#f9a8d4", Gaming:       "#c026d3", Creativity: "#a855f7", Events: "#f0abfc",
   "Life Events":  "#94a3b8", "Life Stage": "#64748b", Childhood:  "#fca5a5", Routine:    "#86efac",
   Pets:           "#fde047", Vehicle:      "#94a3b8", "Real Estate": "#78716c",
 }
 
-const ENTITY_TYPE_COLORS: Record<string, string> = {
-  item:   "#f472b6",
-  brand:  "#60a5fa",
-  place:  "#fb923c",
-  person: "#a78bfa",
-  event:  "#facc15",
-}
-
 const DEFAULT_COLOR = "#6b7280"
 
+// One color axis: every node colored by topic/theme. entity_type is conveyed by the
+// tooltip, not a second color language (that split-brain was the old bug).
 function nodeColor(node: GraphNode): string {
-  if (node.source === "system") return TOPIC_COLORS[node.topic ?? ""] ?? DEFAULT_COLOR
-  if (node.entity_type) return ENTITY_TYPE_COLORS[node.entity_type] ?? DEFAULT_COLOR
   return TOPIC_COLORS[node.topic ?? ""] ?? DEFAULT_COLOR
 }
 
@@ -64,6 +56,8 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
   const zoomTransformRef = useRef<d3.ZoomTransform | null>(null)
   // Persist node positions between redraws so existing nodes don't jump
   const positionsRef = useRef<Record<string, { x: number; y: number }>>({})
+  // Track which node IDs we've already drawn, so genuinely new nodes can animate in
+  const seenNodeIdsRef = useRef<Set<string>>(new Set())
   const [graphData, setGraphData] = useState<GraphData>(initialData)
 
   const draw = useCallback(() => {
@@ -81,6 +75,28 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
       y: positionsRef.current[n.id]?.y,
     }))
     const links: GraphLink[] = graphData.links.map((l) => ({ ...l }))
+
+    // Connect "You" to the graph: the home screen should read as a portrait of the self,
+    // not a floating dot. Synthesize (client-side, never persisted) an edge from the
+    // _profile.md root to every top-level entity — i.e. nodes that don't already hang off
+    // a brand. Items under a brand stay nested; everything else links straight to You.
+    const profile = nodes.find((n) => n.path === "_profile.md")
+    if (profile) {
+      const brandChildren = new Set(
+        links
+          .filter((l) => l.link_type === "brand")
+          .map((l) => (typeof l.target === "string" ? l.target : (l.target as GraphNode).id))
+      )
+      for (const n of nodes) {
+        if (n.id === profile.id || brandChildren.has(n.id)) continue
+        links.push({ id: `self-${n.id}`, source: profile.id, target: n.id, anchor_text: null, link_type: "self" })
+      }
+    }
+
+    // New nodes since the last draw — these animate in. Empty set on first load (nothing "new").
+    const seen = seenNodeIdsRef.current
+    const isFirstDraw = seen.size === 0
+    const isNew = (id: string) => !isFirstDraw && !seen.has(id)
 
     // Degree map for node sizing
     const degreeMap: Record<string, number> = {}
@@ -120,13 +136,19 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
         .radius((d) => nodeRadius(degreeMap[d.id] ?? 0) + 10)
       )
 
-    // Links — brand edges: faint purple; tag edges: barely-visible white
+    // Links — a knowledge graph's appeal IS its connectedness, so keep edges readable.
+    // self (You→entity): soft white spine; brand: purple; tag (shared-topic): faint white.
+    const linkStyle: Record<string, { stroke: string; width: number }> = {
+      self:  { stroke: "#ffffff33", width: 1.25 },
+      brand: { stroke: "#a78bfa45", width: 1.25 },
+      tag:   { stroke: "#ffffff1a", width: 1 },
+    }
     const link = g.append("g")
       .selectAll("line")
       .data(links)
       .join("line")
-      .attr("stroke", (d) => d.link_type === "tag" ? "#ffffff08" : "#a78bfa20")
-      .attr("stroke-width", 1)
+      .attr("stroke", (d) => (linkStyle[d.link_type ?? "tag"] ?? linkStyle.tag).stroke)
+      .attr("stroke-width", (d) => (linkStyle[d.link_type ?? "tag"] ?? linkStyle.tag).width)
 
     const node = g.append("g")
       .selectAll<SVGGElement, GraphNode>("g")
@@ -147,18 +169,28 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
       )
 
     // Outer glow ring
-    node.append("circle")
+    const glow = node.append("circle")
       .attr("r", (d) => nodeRadius(degreeMap[d.id] ?? 0) + 5)
       .attr("fill", (d) => nodeColor(d))
       .attr("opacity", 0.1)
 
-    // Main circle — filled for entity nodes, hollow ring for system hub nodes
-    node.append("circle")
-      .attr("r", (d) => nodeRadius(degreeMap[d.id] ?? 0))
-      .attr("fill", (d) => d.source === "system" ? "none" : nodeColor(d))
-      .attr("stroke", (d) => d.source === "system" ? nodeColor(d) : "none")
-      .attr("stroke-width", (d) => d.source === "system" ? 1.5 : 0)
+    // Main circle — every node filled and colored by topic (one color axis)
+    const core = node.append("circle")
+      .attr("r", (d) => isNew(d.id) ? 0 : nodeRadius(degreeMap[d.id] ?? 0))
+      .attr("fill", (d) => nodeColor(d))
       .attr("opacity", 0.85)
+
+    // Dramatize node birth: new nodes scale in with an elastic pop + a one-shot glow pulse.
+    core.filter((d) => isNew(d.id))
+      .transition().duration(750).ease(d3.easeElasticOut.amplitude(1).period(0.5))
+      .attr("r", (d) => nodeRadius(degreeMap[d.id] ?? 0))
+    glow.filter((d) => isNew(d.id))
+      .attr("opacity", 0.5)
+      .transition().duration(900).ease(d3.easeCubicOut)
+      .attr("opacity", 0.1)
+
+    // Remember what we've drawn so only truly-new nodes animate next time
+    seenNodeIdsRef.current = new Set(nodes.map((n) => n.id))
 
     node.append("text")
       .text((d) => d.title)
@@ -230,12 +262,14 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
     return () => observer.disconnect()
   }, [draw])
 
-  // Refresh graph after each chat reply — triggered by parent via refreshTrigger
+  // Refresh graph after each chat reply — triggered by parent via refreshTrigger.
+  // Extraction is fire-and-forget (after()), so there's no completion signal to await.
+  // ponytail: poll twice instead of one blind wait — covers fast and slow extractions.
+  // The seenNodeIds diff makes the second fetch idempotent (only new nodes animate).
   useEffect(() => {
     if (!refreshTrigger) return
     const supabase = createClient()
-    // ponytail: small delay so extraction (fire-and-forget after()) has time to write
-    const id = setTimeout(async () => {
+    const fetchGraph = async () => {
       const [{ data: notes }, { data: links }] = await Promise.all([
         supabase.from("vault_notes").select("id, title, topic, path, content_md, intent, source, entity_type"),
         supabase.from("vault_links").select("id, source_note_id, target_note_id, anchor_text, link_type"),
@@ -251,8 +285,9 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
           link_type: l.link_type ?? null,
         })),
       })
-    }, 4000)
-    return () => clearTimeout(id)
+    }
+    const timers = [setTimeout(fetchGraph, 3000), setTimeout(fetchGraph, 6500)]
+    return () => timers.forEach(clearTimeout)
   }, [refreshTrigger])
 
   return (

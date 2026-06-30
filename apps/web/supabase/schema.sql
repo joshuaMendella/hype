@@ -152,6 +152,30 @@ CREATE INDEX IF NOT EXISTS idx_conversations_user  ON public.conversations(user_
 ALTER TABLE public.vault_notes ADD COLUMN IF NOT EXISTS entity_type TEXT;
 ALTER TABLE public.vault_links ADD COLUMN IF NOT EXISTS link_type TEXT DEFAULT 'brand';
 
+-- Phase 4 — advertiser data layer
+-- Per-category ad consent: { "fashion": true, "electronics": false, ... }
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS ad_preferences JSONB DEFAULT '{}'::jsonb;
+
+-- Intent lifecycle: expressed wants ("I need new running shoes") become tracked,
+-- consent-gated, expiring referral opportunities. CPA/affiliate revenue lives here.
+CREATE TABLE IF NOT EXISTS public.intents (
+  id              UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id         UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  entity_note_id  UUID REFERENCES public.vault_notes(id) ON DELETE CASCADE,
+  category        TEXT,                       -- affiliate category (lib/ads/categories.ts)
+  utterance       TEXT,                       -- phrase that signalled the intent
+  confidence      FLOAT DEFAULT 0,
+  status          TEXT DEFAULT 'open' CHECK (status IN ('open','offered','converted','expired')),
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  expires_at      TIMESTAMPTZ
+);
+
+ALTER TABLE public.intents ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "intents: own" ON public.intents FOR ALL USING (auth.uid() = user_id);
+
+CREATE INDEX IF NOT EXISTS idx_intents_user ON public.intents(user_id);
+CREATE INDEX IF NOT EXISTS idx_intents_open ON public.intents(user_id, status) WHERE status = 'open';
+
 -- Auto-update conversations.updated_at on any row change (needed for session timeout detection)
 CREATE OR REPLACE FUNCTION public.handle_updated_at()
 RETURNS TRIGGER AS $$
