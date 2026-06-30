@@ -11,6 +11,7 @@ export const TIER_PARAMS: Record<EntityType, { tier1: string[]; tier2: string[];
 
 export function getTier1Missing(entityType: EntityType, content_md: string): string[] {
   const tier1 = TIER_PARAMS[entityType]?.tier1 ?? []
-  const present = new Set([...(content_md ?? "").matchAll(/\*\*(.+?)\*\*:/g)].map((m) => m[1]))
-  return tier1.filter((a) => !present.has(a))
+  // Case-insensitive: extracted attribute titles may be lowercase ("category") while tier names are Title Case ("Category").
+  const present = new Set([...(content_md ?? "").matchAll(/\*\*(.+?)\*\*:/g)].map((m) => m[1].toLowerCase()))
+  return tier1.filter((a) => !present.has(a.toLowerCase()))
 }
