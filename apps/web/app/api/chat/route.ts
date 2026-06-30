@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server"
 import { createClient } from "@/lib/supabase/server"
-import { extractFacts } from "@/lib/ai/extract"
+import { extractFacts, closeSession } from "@/lib/ai/extract"
 import { synthesize } from "@/lib/ai/synthesize"
 import { CHECKLIST_PROMPT, type Agenda } from "@/lib/ai/checklists"
 import { getTier1Missing, type EntityType } from "@/lib/ai/entityTypes"
@@ -71,6 +71,12 @@ When pivoting, do not announce it. Simply ask about something different.
 
 Casual mention rule: if the user mentions a new entity in passing while answering about the current one (e.g. "I got it in my hometown of Viareggio"), do NOT immediately pivot to it. Note it mentally (it'll come around), finish what you're on first, then transition naturally: "Nice — and you mentioned Viareggio, is that where you're from?"
 
+## Transitions between threads
+A dead-end or deflection pivot is silent (above) — you just move on. But switching between two things the user is actually engaged in should never be a hard cut; an abrupt jump ("Which salon did you go to?" right after talking about the mall) is exactly what makes this feel like an interrogation. Close the current thread warmly in a few words, then bridge into the next:
+✓ "Glad you found a barber you like. Back to that mall — what were you hoping to grab?"
+✓ "Sounds like a good trip. Oh — you mentioned a new shirt earlier, what are you after?"
+When you return to an earlier thread, name it so they're not lost ("back to the mall…"). Still one question per turn — the bridge is a phrase, not a second question.
+
 ## Session lifecycle
 
 Opening (first message of a new session):
@@ -81,12 +87,13 @@ Opening (first message of a new session):
 During the session:
 - After completing an entity, transition smoothly: "Nice — anything else going on lately?"
 - Stay on one thread at a time before switching.
-- If the user gives 3 consecutive short replies, offer to wrap: "That's plenty for today — we can pick this up tomorrow."
+- If the user gives 3 consecutive short replies, offer to wrap as a question: "That's plenty for today — want to pick this up tomorrow?" (then let them decide)
 
 Ending:
-- User says "bye", "gotta go", "talk later", or any farewell → respond with "Talk soon." Nothing more.
-- User seems tired or bored → "Let's leave it there — catch up tomorrow."
-- After a natural close, do not start a new thread. Let it end.
+- Don't end unilaterally. At a natural stopping point (you've covered a few things, or their energy dips), PROPOSE it as a question and let them decide: "This was great — want to pick it up tomorrow?" Then wait for their answer. Do not declare the session over on your own.
+- Only sign off once they agree, or when they say "bye", "gotta go", "talk later", or any farewell of their own.
+- Make the sign-off warm and personal, not a form letter: always include "Talk soon", plus a small touch that shows you listened — "Talk soon — enjoy the mall!" or "Talk soon, good luck with the shirt hunt." One short line.
+- After signing off, do not start a new thread. Let it end.
 
 ## Handling unusual input
 
@@ -190,34 +197,41 @@ export async function POST(req: NextRequest) {
   let agenda: Agenda = { current: null, pending: [] }
   let isNewSession = false
 
-  const { data: existing } = await supabase
+  // Most recent conversation, any status — drives session continuity
+  const { data: recent } = await supabase
     .from("conversations")
-    .select("id, agenda, updated_at")
+    .select("id, agenda, updated_at, status")
     .eq("user_id", user.id)
-    .eq("status", "active")
     .order("created_at", { ascending: false })
     .limit(1)
     .single()
 
-  if (existing) {
-    const stale = isOpeningMessage && Date.now() - new Date(existing.updated_at).getTime() > TWO_HOURS_MS
-    if (stale) {
-      // New session: close old conversation, carry current + pending queue forward
-      const oldAgenda = (existing.agenda as Agenda) ?? { current: null, pending: [] }
-      const carryover = [...(oldAgenda.pending ?? []), ...(oldAgenda.current ? [{ ...oldAgenda.current, turns: 0, weight: 1 }] : [])]
-      await supabase.from("conversations").update({ status: "completed" }).eq("id", existing.id)
-      const { data: created } = await supabase
-        .from("conversations")
-        .insert({ user_id: user.id, agenda: { current: null, pending: carryover } })
-        .select("id")
-        .single()
-      conversationId = created!.id
-      agenda = { current: null, pending: carryover }
-      isNewSession = true
+  const reuseable =
+    recent?.status === "active" &&
+    !(isOpeningMessage && Date.now() - new Date(recent.updated_at).getTime() > TWO_HOURS_MS)
+
+  if (reuseable) {
+    conversationId = recent!.id
+    agenda = (recent!.agenda as Agenda) ?? { current: null, pending: [] }
+  } else if (recent) {
+    // New session. Carry survivors forward. Stale-active conversations are closed via
+    // closeSession (banks intent, prunes); a farewell-completed conversation was already
+    // closed last turn, so its pending is the pruned survivor list — just read it.
+    let carryover: Agenda["pending"]
+    if (recent.status === "active") {
+      carryover = await closeSession(recent.id, user.id)
+      await supabase.from("conversations").update({ status: "completed" }).eq("id", recent.id)
     } else {
-      conversationId = existing.id
-      agenda = (existing.agenda as Agenda) ?? { current: null, pending: [] }
+      carryover = ((recent.agenda as Agenda) ?? { current: null, pending: [] }).pending ?? []
     }
+    const { data: created } = await supabase
+      .from("conversations")
+      .insert({ user_id: user.id, agenda: { current: null, pending: carryover } })
+      .select("id")
+      .single()
+    conversationId = created!.id
+    agenda = { current: null, pending: carryover }
+    isNewSession = carryover.length > 0
   } else {
     const { data: created } = await supabase
       .from("conversations")
@@ -276,7 +290,7 @@ export async function POST(req: NextRequest) {
 
   const sessionTopicCount = topicsThisSession ?? 0
   const sessionContext = sessionTopicCount >= 3
-    ? `## Session depth: ${sessionTopicCount} entities captured this session. After wrapping the current entity, close naturally — "That's a good amount for today — we can pick up the rest next time." Do not start new entities after this.`
+    ? `## Session depth: ${sessionTopicCount} entities captured this session. You've covered a good amount — after the current thread, propose wrapping as a question ("want to pick this up tomorrow?") and let them decide. Do not start new entities after this.`
     : `## Session depth: ${sessionTopicCount} of 3 entities captured this session.`
 
   const systemPrompt = isOnboarding
@@ -343,7 +357,9 @@ export async function POST(req: NextRequest) {
   }
   console.log("[chat] reply:", reply.slice(0, 150))
 
-  const isFarewell = /\bTalk soon\b|\blet's leave it there\b|\bcatch up tomorrow\b/i.test(reply)
+  // Sign-off always contains "Talk soon" (system prompt mandates it); wrap-up *proposals*
+  // ("want to pick this up tomorrow?") deliberately don't, so they never close prematurely.
+  const isFarewell = /\btalk soon\b/i.test(reply)
 
   const lastUserMsg = messages.findLast((m) => m.role === "user")
   if (lastUserMsg && conversationId) {
@@ -363,6 +379,8 @@ export async function POST(req: NextRequest) {
       after(() =>
         synthesize(messages, agenda)
           .then((extraction) => extractFacts(conversationId, user.id, extraction))
+          // On farewell, bank intent entities + prune the queue after the last turn merges
+          .then(() => (isFarewell ? closeSession(conversationId, user.id).then(() => {}) : undefined))
           .catch((err) => console.error("[chat] extraction failed:", err))
       )
     }
