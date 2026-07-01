@@ -92,6 +92,7 @@ export interface GraphNode {
   wordCount: number
   source: NoteSource
   entity_type: EntityType | null
+  attributes: { label: string; value: string }[]
   x?: number
   y?: number
   vx?: number

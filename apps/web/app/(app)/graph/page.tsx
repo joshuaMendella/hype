@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server"
 import { redirect } from "next/navigation"
 import GraphWrapper from "@/components/graph/GraphWrapper"
+import { parseAttributes } from "@/components/graph/parseAttributes"
 import type { GraphData } from "@/types/database"
 
 export default async function GraphPage() {
@@ -26,6 +27,7 @@ export default async function GraphPage() {
       wordCount: n.content_md?.split(" ").length ?? 1,
       source: n.source ?? "conversation",
       entity_type: n.entity_type ?? null,
+      attributes: parseAttributes(n.content_md),
     })),
     links: (links ?? []).map((l) => ({
       id: l.id,

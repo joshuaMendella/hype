@@ -4,6 +4,9 @@ import { useEffect, useRef, useCallback, useState } from "react"
 import * as d3 from "d3"
 import { createClient } from "@/lib/supabase/client"
 import type { GraphData, GraphNode, GraphLink, VaultNote } from "@/types/database"
+import { parseAttributes } from "./parseAttributes"
+
+const escHtml = (s: string) => s.replace(/[&<>]/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;"))
 
 const TOPIC_COLORS: Record<string, string> = {
   Profile:        "#ffffff",
@@ -42,6 +45,7 @@ function noteToNode(note: Pick<VaultNote, "id" | "title" | "topic" | "path" | "i
     wordCount: note.content_md?.split(" ").length ?? 1,
     source: note.source,
     entity_type: note.entity_type ?? null,
+    attributes: parseAttributes(note.content_md),
   }
 }
 
@@ -204,7 +208,12 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
       .on("mouseenter", (event, d) => {
         const tooltip = tooltipRef.current
         if (!tooltip) return
-        tooltip.textContent = `${d.title}${d.entity_type ? ` · ${d.entity_type}` : d.topic ? ` · ${d.topic}` : ""}`
+        const sub = d.entity_type ?? d.topic ?? ""
+        const header = `<div class="font-medium text-white/90">${escHtml(d.title)}${sub ? ` <span class="text-white/40">· ${escHtml(sub)}</span>` : ""}</div>`
+        const rows = (d.attributes ?? [])
+          .map((a) => `<div><span class="text-white/45">${escHtml(a.label)}:</span> ${escHtml(a.value)}</div>`)
+          .join("")
+        tooltip.innerHTML = header + rows
         tooltip.style.opacity = "1"
         tooltip.style.left = `${event.pageX + 12}px`
         tooltip.style.top = `${event.pageY - 8}px`
@@ -295,7 +304,7 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
       <svg ref={svgRef} className="w-full h-full" style={{ background: "transparent" }} />
       <div
         ref={tooltipRef}
-        className="fixed pointer-events-none text-xs bg-black/80 text-white/80 px-2 py-1 rounded-md border border-white/10 opacity-0 transition-opacity duration-100 z-50"
+        className="fixed pointer-events-none text-xs bg-black/85 text-white/80 px-2.5 py-1.5 rounded-md border border-white/10 opacity-0 transition-opacity duration-100 z-50 max-w-xs leading-relaxed"
       />
     </>
   )

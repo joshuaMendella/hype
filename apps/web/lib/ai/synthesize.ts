@@ -78,6 +78,8 @@ export const SYSTEM = `You are an extraction engine for a personal knowledge gra
 ## What to skip
 - One-off mentions with no durability ("I had a coffee") unless a frequency makes it routine
 - Anything already being tracked (see "Currently tracking" below) — don't re-create it as a new entity
+- A routine visit or trip to a place is NOT a separate event — the place itself captures it. Reserve event for dated occasions (a concert, a wedding, a planned trip), never "went to the mall / visited the shop".
+- Rooms or spots where an item lives or will be used ("living room", "bedroom", "home" for a cooler) are NOT place entities — record that as the item's Location attribute. Only create a place for somewhere the user actually goes.
 
 ## entity_type — pick exactly one per entity
 - item: a physical thing the user owns or wants
