@@ -5,10 +5,58 @@ import { synthesize } from "@/lib/ai/synthesize"
 import { CHECKLIST_PROMPT, type Agenda } from "@/lib/ai/checklists"
 import { getTier1Missing, type EntityType } from "@/lib/ai/entityTypes"
 
-// ponytail: fetch over SDK — no new dep, one URL to swap providers
-const CHAT_URL = "https://api.cerebras.ai/v1/chat/completions"
-const CHAT_KEY = process.env.CEREBRAS_API_KEY!
-const CHAT_MODEL = "gpt-oss-120b"
+// Chat interviewer: Gemini 2.5 Flash primary (model-shootout winner — honors the
+// persona's transition / one-question / memory rules that gpt-oss-120b dropped);
+// Cerebras gpt-oss-120b fallback if Gemini fails (e.g. free-tier rate limit).
+const GEMINI_CHAT_MODEL = "gemini-2.5-flash"
+const GEMINI_CHAT_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_CHAT_MODEL}:generateContent`
+const GEMINI_KEY = process.env.GEMINI_API_KEY
+const CEREBRAS_URL = "https://api.cerebras.ai/v1/chat/completions"
+const CEREBRAS_KEY = process.env.CEREBRAS_API_KEY
+const CEREBRAS_CHAT_MODEL = "gpt-oss-120b"
+
+type ChatMsg = { role: "user" | "assistant"; content: string }
+
+async function geminiChat(system: string, history: ChatMsg[]): Promise<string> {
+  if (!GEMINI_KEY) throw new Error("GEMINI_API_KEY not set")
+  const contents = history.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }],
+  }))
+  const res = await fetch(`${GEMINI_CHAT_URL}?key=${GEMINI_KEY}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: system }] },
+      contents,
+      generationConfig: { temperature: 0.8, thinkingConfig: { thinkingBudget: 0 }, maxOutputTokens: 512 },
+    }),
+  })
+  if (!res.ok) throw new Error(`gemini ${res.status}: ${await res.text().catch(() => "")}`)
+  const data = await res.json()
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!text) throw new Error(`gemini: empty response ${JSON.stringify(data).slice(0, 200)}`)
+  return text.trim()
+}
+
+async function cerebrasChat(system: string, history: ChatMsg[]): Promise<string> {
+  if (!CEREBRAS_KEY) throw new Error("CEREBRAS_API_KEY not set")
+  const res = await fetch(CEREBRAS_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${CEREBRAS_KEY}` },
+    body: JSON.stringify({
+      model: CEREBRAS_CHAT_MODEL,
+      max_tokens: 2000,
+      messages: [{ role: "system", content: system }, ...history],
+    }),
+  })
+  if (!res.ok) throw new Error(`cerebras ${res.status}: ${await res.text().catch(() => "")}`)
+  const data = await res.json()
+  const msg = data.choices?.[0]?.message ?? {}
+  const raw = (msg.content || msg.reasoning || "").trim()
+  if (!raw) throw new Error("cerebras: empty response")
+  return raw
+}
 
 const SYSTEM_PROMPT = `You are a curious friend catching up with someone over text. You genuinely want to know how their life is going — what they're into, what they've been up to, what matters to them. As they talk, you quietly remember the details. You are openly an AI building their personal vault (they were told this at onboarding), so you never have to act covert — you just have to be good company.
 
@@ -34,6 +82,7 @@ Usually one reaction + one question — but don't be a metronome. A relentless o
 - React without immediately firing off the next question.
 - Let a good story breathe before you follow up.
 Warmth over completeness. Never put two questions in one turn.
+Never re-ask something you already asked this session, even reworded — if they didn't give a usable answer, drop it and move to something new. And don't recycle the same reaction turn after turn (e.g. saying "glad you found a barber" three times) — vary how you respond.
 
 ## Connect what you already know
 Their vault is below ("What you already know about this person"). Use it. Linking a new fact to an old one is the warmest, most human move you have:
@@ -53,6 +102,7 @@ No bullet lists, no paragraphs, no multi-sentence speeches. Plain conversational
 
 ## When you do ask for details — bundle and stay concrete
 Combine related attributes into one human question instead of drip-feeding them.
+When someone's actively shopping for or clearly into a specific item, get its concrete details (clothing → color, material, size, bundled) rather than drifting to a vague "did you find it?" — those details are what the vault needs; a yes/no doesn't help.
 ✓ "So what were those shoes like — color, size?"   ✓ "What model was it, and where'd you get it?"
 ✗ "What color is it?" then next turn "What material?" — never split related details across turns.
 Some natural orders when a thread is worth the dig: clothing → what it is, then color/material/size bundled (price only if they raise it); place → what for, who with, how often; person → who they are and how the user knows them; event → what kind, when, who with. A city revealed ("my city", "I'm from", "I live in") → softly confirm it as home ("Oh, you're based in X?").
@@ -306,37 +356,27 @@ export async function POST(req: NextRequest) {
         buildAgendaContext(agenda),
       ].filter(Boolean).join("\n\n")
 
-  const chatRes = await fetch(CHAT_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${CHAT_KEY}` },
-    body: JSON.stringify({
-      model: CHAT_MODEL,
-      max_tokens: 2000,
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...messages.map((m) => ({
-          role: m.role,
-          // strip [reviewer annotations] — stored raw in DB, invisible to LLM
-          content: m.role === "user" ? m.content.replace(/\[.*?\]/g, "").trim() : m.content,
-        })),
-      ],
-    }),
-  })
+  // strip [reviewer annotations] from user turns — stored raw in DB, invisible to LLM
+  const history: ChatMsg[] = messages.map((m) => ({
+    role: m.role,
+    content: m.role === "user" ? m.content.replace(/\[.*?\]/g, "").trim() : m.content,
+  }))
 
-  if (!chatRes.ok) {
-    const errBody = await chatRes.json().catch(() => ({}))
-    console.error("[chat] Cerebras error:", chatRes.status, JSON.stringify(errBody))
-    const isRateLimit = chatRes.status === 429
-    return NextResponse.json(
-      { error: isRateLimit ? "rate_limit" : "groq_error" },
-      { status: chatRes.status }
-    )
+  // Gemini 2.5 Flash primary; Cerebras gpt-oss-120b fallback.
+  let raw: string
+  try {
+    raw = await geminiChat(systemPrompt, history)
+  } catch (gemErr) {
+    console.error("[chat] Gemini chat failed, falling back to Cerebras:", gemErr)
+    try {
+      raw = await cerebrasChat(systemPrompt, history)
+    } catch (cereErr) {
+      console.error("[chat] chat failed (both providers):", cereErr)
+      const isRateLimit = String(gemErr).includes(" 429") || String(cereErr).includes(" 429")
+      return NextResponse.json({ error: isRateLimit ? "rate_limit" : "chat_error" }, { status: isRateLimit ? 429 : 502 })
+    }
   }
-
-  const chatData = await chatRes.json()
-  const msg = chatData.choices[0]?.message ?? {}
-  const raw = msg.content || msg.reasoning || ""
-  console.log("[chat] finish_reason:", chatData.choices[0]?.finish_reason, "| raw:", raw.slice(0, 200))
+  console.log("[chat] raw:", raw.slice(0, 200))
 
   // Interview path returns plain text. Only onboarding still uses a small JSON contract
   // (reply + onboarding_complete) — no extraction, so the JSON-leak risk is negligible.

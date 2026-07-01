@@ -7,12 +7,17 @@ import type { ExtractionResult, RawEntity, Attr } from "./extract"
 // conversational model never has to emit JSON. Strict structured outputs
 // guarantee a schema-valid response, removing the JSON-leak/parse bug class.
 //
-// Model is intentionally isolated to this block. To move extraction to another
-// provider later (e.g. Anthropic Sonnet for higher accuracy), swap the fetch
-// call + EXTRACT_MODEL here — nothing else in the pipeline changes.
-const EXTRACT_URL = "https://api.cerebras.ai/v1/chat/completions"
-const EXTRACT_KEY = process.env.CEREBRAS_API_KEY!
-const EXTRACT_MODEL = "gpt-oss-120b" // free tier; OpenAI-compatible strict json_schema
+// Primary extractor: Gemini 2.5 Flash — chosen via the model shootout (scripts/
+// model-shootout.ts): it reliably links item→brand and flags purchase intent,
+// both of which gpt-oss-120b missed, sinking the ad/intent signal. Cerebras
+// gpt-oss-120b stays as a one-call fallback if the Gemini request fails.
+const GEMINI_MODEL = "gemini-2.5-flash"
+const GEMINI_KEY = process.env.GEMINI_API_KEY
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`
+
+const CEREBRAS_URL = "https://api.cerebras.ai/v1/chat/completions"
+const CEREBRAS_KEY = process.env.CEREBRAS_API_KEY
+const CEREBRAS_MODEL = "gpt-oss-120b" // fallback; OpenAI-compatible strict json_schema
 
 const INTENT_MARKERS = ["want", "need", "looking for", "thinking about getting", "planning to", "going to get"]
 
@@ -29,7 +34,7 @@ const attrSchema = {
   required: ["title", "value", "inferred", "source_utterance"],
 } as const
 
-const SCHEMA = {
+export const SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
@@ -63,7 +68,7 @@ const SCHEMA = {
   required: ["attributes", "entities"],
 } as const
 
-const SYSTEM = `You are an extraction engine for a personal knowledge graph. You read a short slice of a conversation between an interviewer (assistant) and a user, and pull out durable facts about the user. You do NOT talk to the user — you only return structured data.
+export const SYSTEM = `You are an extraction engine for a personal knowledge graph. You read a short slice of a conversation between an interviewer (assistant) and a user, and pull out durable facts about the user. You do NOT talk to the user — you only return structured data.
 
 ## What counts as durable (extract these)
 - Owned items, preferred brands, frequent places, recurring relationships, scheduled/past events
@@ -80,6 +85,9 @@ const SYSTEM = `You are an extraction engine for a personal knowledge graph. You
 - place: a location they go to
 - person: someone in their life
 - event: something that happens at a time
+
+## brand — link an item to the store when one is named
+When the user is shopping for, looking at, or bought an item at a named store or brand in the same slice ("pants at H&M", "shoes from Nike"), set that item's brand field to that store/brand. Do NOT leave brand empty when the store is named — the item and its brand belong linked. Only leave brand empty when no store/brand is mentioned for that item.
 
 ## title vs attributes
 - title is the bare noun: "Belt", "Running shoes", "Monmouth Coffee" — NOT "black leather belt".
@@ -102,7 +110,7 @@ intent: true ONLY when the user expresses a forward-looking desire to acquire or
 
 Return only the structured JSON. Extract nothing if the slice contains no durable facts.`
 
-function buildWindow(messages: Array<{ role: "user" | "assistant"; content: string }>): string {
+export function buildWindow(messages: Array<{ role: "user" | "assistant"; content: string }>): string {
   // last ~8 turns, reviewer annotations stripped, so the analyst sees the same text the LLM saw
   return messages
     .slice(-8)
@@ -110,7 +118,7 @@ function buildWindow(messages: Array<{ role: "user" | "assistant"; content: stri
     .join("\n")
 }
 
-function agendaContext(agenda: Agenda): string {
+export function agendaContext(agenda: Agenda): string {
   if (!agenda.current) return "Currently tracking: (nothing yet)"
   const known = agenda.current.attributes.map((a) => a.title).join(", ") || "none"
   return `Currently tracking: "${agenda.current.title}" (${agenda.current.entity_type}). Already have these attributes: ${known}.`
@@ -129,6 +137,72 @@ type ParsedEntity = {
   attributes: Attr[]
 }
 
+type RawParsed = { attributes: Attr[]; entities: ParsedEntity[] }
+
+// Gemini wants an OpenAPI-subset schema (uppercase types, no additionalProperties).
+function toGeminiSchema(s: any): any {
+  if (s.type === "object") {
+    return {
+      type: "OBJECT",
+      properties: Object.fromEntries(Object.entries(s.properties).map(([k, v]) => [k, toGeminiSchema(v)])),
+      required: s.required,
+      ...(s.description ? { description: s.description } : {}),
+    }
+  }
+  if (s.type === "array") return { type: "ARRAY", items: toGeminiSchema(s.items), ...(s.description ? { description: s.description } : {}) }
+  const o: Record<string, unknown> = { type: String(s.type).toUpperCase() }
+  if (s.enum) o.enum = s.enum
+  if (s.description) o.description = s.description
+  return o
+}
+const GEMINI_SCHEMA = toGeminiSchema(SCHEMA)
+
+async function extractGemini(userContent: string): Promise<RawParsed> {
+  if (!GEMINI_KEY) throw new Error("GEMINI_API_KEY not set")
+  const res = await fetch(`${GEMINI_URL}?key=${GEMINI_KEY}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: SYSTEM }] },
+      contents: [{ role: "user", parts: [{ text: userContent }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: GEMINI_SCHEMA,
+        thinkingConfig: { thinkingBudget: 0 }, // extraction needs no reasoning tokens
+        temperature: 0, // deterministic structured extraction
+        maxOutputTokens: 2048,
+      },
+    }),
+  })
+  if (!res.ok) throw new Error(`gemini ${res.status}: ${await res.text().catch(() => "")}`)
+  const data = await res.json()
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!text) throw new Error("gemini: empty response")
+  return JSON.parse(text) as RawParsed
+}
+
+async function extractCerebras(userContent: string): Promise<RawParsed> {
+  if (!CEREBRAS_KEY) throw new Error("CEREBRAS_API_KEY not set")
+  const res = await fetch(CEREBRAS_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${CEREBRAS_KEY}` },
+    body: JSON.stringify({
+      model: CEREBRAS_MODEL,
+      max_tokens: 3000,
+      response_format: { type: "json_schema", json_schema: { name: "extraction", strict: true, schema: SCHEMA } },
+      messages: [
+        { role: "system", content: SYSTEM },
+        { role: "user", content: userContent },
+      ],
+    }),
+  })
+  if (!res.ok) throw new Error(`cerebras ${res.status}: ${await res.text().catch(() => "")}`)
+  const data = await res.json()
+  const text = data.choices?.[0]?.message?.content
+  if (!text) throw new Error("cerebras: empty response")
+  return JSON.parse(text) as RawParsed
+}
+
 export async function synthesize(
   messages: Array<{ role: "user" | "assistant"; content: string }>,
   agenda: Agenda
@@ -136,56 +210,40 @@ export async function synthesize(
   const empty: ExtractionResult = { attributes: [], entities: [] }
   if (!messages.length) return empty
 
-  try {
-    const res = await fetch(EXTRACT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${EXTRACT_KEY}` },
-      body: JSON.stringify({
-        model: EXTRACT_MODEL,
-        max_tokens: 3000,
-        response_format: {
-          type: "json_schema",
-          json_schema: { name: "extraction", strict: true, schema: SCHEMA },
-        },
-        messages: [
-          { role: "system", content: SYSTEM },
-          { role: "user", content: `${agendaContext(agenda)}\n\nConversation slice:\n${buildWindow(messages)}` },
-        ],
-      }),
-    })
+  const userContent = `${agendaContext(agenda)}\n\nConversation slice:\n${buildWindow(messages)}`
 
-    if (!res.ok) {
-      console.error("[synthesize] extraction HTTP error:", res.status, await res.text().catch(() => ""))
+  // Gemini 2.5 Flash primary; Cerebras gpt-oss-120b one-call fallback.
+  let parsed: RawParsed
+  try {
+    parsed = await extractGemini(userContent)
+  } catch (gemErr) {
+    console.error("[synthesize] Gemini extraction failed, falling back to Cerebras:", gemErr)
+    try {
+      parsed = await extractCerebras(userContent)
+    } catch (cereErr) {
+      console.error("[synthesize] extraction failed (both providers):", cereErr)
       return empty
     }
-
-    const data = await res.json()
-    const text = data.choices?.[0]?.message?.content
-    if (!text) return empty
-    const parsed = JSON.parse(text) as { attributes: Attr[]; entities: ParsedEntity[] }
-
-    // Normalize "" → null and apply dual-signal intent validation (model flag AND a forward-looking marker)
-    const entities: RawEntity[] = (parsed.entities ?? []).map((e) => {
-      const hasMarker = INTENT_MARKERS.some((m) => (e.intent_utterance ?? "").toLowerCase().includes(m))
-      const intent = e.intent && hasMarker
-      return {
-        title: e.title,
-        topic: e.tags?.[0] ?? e.entity_type,
-        brand: e.brand?.trim() ? e.brand.trim() : null,
-        entity_type: e.entity_type,
-        tags: e.tags ?? [],
-        intent,
-        intent_confidence: intent ? e.intent_confidence ?? 0 : 0,
-        intent_utterance: intent ? e.intent_utterance ?? "" : "",
-        scheduled_for: e.scheduled_for?.trim() ? e.scheduled_for.trim() : null,
-        description: e.description ?? "",
-        attributes: e.attributes ?? [],
-      }
-    })
-
-    return { attributes: parsed.attributes ?? [], entities }
-  } catch (err) {
-    console.error("[synthesize] extraction failed:", err)
-    return empty
   }
+
+  // Normalize "" → null and apply dual-signal intent validation (model flag AND a forward-looking marker)
+  const entities: RawEntity[] = (parsed.entities ?? []).map((e) => {
+    const hasMarker = INTENT_MARKERS.some((m) => (e.intent_utterance ?? "").toLowerCase().includes(m))
+    const intent = e.intent && hasMarker
+    return {
+      title: e.title,
+      topic: e.tags?.[0] ?? e.entity_type,
+      brand: e.brand?.trim() ? e.brand.trim() : null,
+      entity_type: e.entity_type,
+      tags: e.tags ?? [],
+      intent,
+      intent_confidence: intent ? e.intent_confidence ?? 0 : 0,
+      intent_utterance: intent ? e.intent_utterance ?? "" : "",
+      scheduled_for: e.scheduled_for?.trim() ? e.scheduled_for.trim() : null,
+      description: e.description ?? "",
+      attributes: e.attributes ?? [],
+    }
+  })
+
+  return { attributes: parsed.attributes ?? [], entities }
 }
