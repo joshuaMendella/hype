@@ -47,6 +47,7 @@ export type RawEntity = {
   scheduled_for: string | null
   description: string
   attributes?: Attr[]
+  relations?: { to: string; label: string }[]
 }
 export type ExtractionResult = { attributes: Attr[]; entities: RawEntity[] }
 
