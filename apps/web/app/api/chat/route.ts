@@ -277,7 +277,6 @@ export async function POST(req: NextRequest) {
   // Fetch conversation first (needed for agenda)
   let conversationId: string
   let agenda: Agenda = { current: null, pending: [] }
-  let isNewSession = false
 
   // Most recent conversation, any status — drives session continuity
   const { data: recent } = await supabase
@@ -296,24 +295,20 @@ export async function POST(req: NextRequest) {
     conversationId = recent!.id
     agenda = (recent!.agenda as Agenda) ?? { current: null, pending: [] }
   } else if (recent) {
-    // New session. Carry survivors forward. Stale-active conversations are closed via
-    // closeSession (banks intent, prunes); a farewell-completed conversation was already
-    // closed last turn, so its pending is the pruned survivor list — just read it.
-    let carryover: Agenda["pending"]
+    // New session. A stale-active conversation is closed (banks intent, persists pending);
+    // a farewell-completed one was already closed last turn. Either way the next
+    // conversation starts fresh — incomplete nodes resurface via "Unfinished from last
+    // session", complete ones via "What you already know".
     if (recent.status === "active") {
-      carryover = await closeSession(recent.id, user.id)
+      await closeSession(recent.id, user.id)
       await supabase.from("conversations").update({ status: "completed" }).eq("id", recent.id)
-    } else {
-      carryover = ((recent.agenda as Agenda) ?? { current: null, pending: [] }).pending ?? []
     }
     const { data: created } = await supabase
       .from("conversations")
-      .insert({ user_id: user.id, agenda: { current: null, pending: carryover } })
+      .insert({ user_id: user.id })
       .select("id")
       .single()
     conversationId = created!.id
-    agenda = { current: null, pending: carryover }
-    isNewSession = carryover.length > 0
   } else {
     const { data: created } = await supabase
       .from("conversations")
@@ -395,7 +390,6 @@ export async function POST(req: NextRequest) {
         SYSTEM_PROMPT,
         vaultContext ? `## What you already know about this person (already captured — weave it in, never re-ask it):\n${vaultContext}` : "",
         incompleteThreads ? `## Unfinished from last session — pick these up naturally when relevant:\n${incompleteThreads}` : "",
-        isNewSession && agenda.pending.length ? `## Carried over from last session — these were queued but not reached:\n${agenda.pending.map((p) => `- ${p.title} (${p.entity_type})`).join("\n")}` : "",
         todayContext,
         sessionContext,
         buildAgendaContext(agenda),
@@ -466,9 +460,8 @@ export async function POST(req: NextRequest) {
     // and never coupled to the conversational reply. Skipped during onboarding.
     if (!isOnboarding) {
       after(() =>
-        synthesize(messages, agenda)
+        synthesize(messages, agenda, vaultNotes ?? [])
           .then((extraction) => extractFacts(conversationId, user.id, extraction))
-          // On farewell, bank intent entities + prune the queue after the last turn merges
           .then(() => (isFarewell ? closeSession(conversationId, user.id).then(() => {}) : undefined))
           .catch((err) => console.error("[chat] extraction failed:", err))
       )

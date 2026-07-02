@@ -49,6 +49,7 @@ export type RawEntity = {
   description: string
   attributes?: Attr[]
   relations?: { to: string; label: string }[]
+  refines?: string
 }
 export type ExtractionResult = { attributes: Attr[]; entities: RawEntity[] }
 
@@ -56,6 +57,18 @@ const toSlug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replac
 
 function attrsToContentMd(attrs: Attr[]): string {
   return attrs.map((a) => `- **${a.title}**: ${a.value}${a.inferred ? " *(inferred)*" : ""}`).join("\n")
+}
+
+// Merge an incoming extracted entity into an existing tracked agenda item: fold its
+// attributes (via mergeAttrs) and carry a forward-looking intent it may bring ("I need
+// blue linen pants" refining the tracked "Pants"). The target keeps its canonical title.
+function mergeEntity(target: AgendaItem, entity: RawEntity) {
+  mergeAttrs(target, entity.attributes)
+  if (entity.intent && !target.intent) {
+    target.intent = true
+    target.intent_utterance = entity.intent_utterance ?? ""
+    target.intent_confidence = entity.intent_confidence ?? 0
+  }
 }
 
 // A place's or person's identity is its name. Once a Name attribute arrives, adopt it
@@ -94,7 +107,7 @@ function parseNote(md: string): { description: string; attributes: Attr[] } {
   return { description: descLines.join(" "), attributes }
 }
 
-type ConvNote = { title: string; topic: string | null; content_md: string | null; entity_type: string | null; intent: boolean | null }
+type ConvNote = { title: string; topic: string | null; content_md: string | null; entity_type: string | null; intent: boolean | null; path: string }
 
 // Reconstruct an AgendaItem from an already-flushed node, merging in newly-stated
 // attributes. Re-running writeEntityToVault on it upserts the SAME node (by path),
@@ -104,7 +117,7 @@ function nodeToAgendaItem(note: ConvNote, entity: RawEntity): AgendaItem {
   const item: AgendaItem = {
     title: note.title,
     topic: note.topic ?? note.entity_type ?? "",
-    brand: parsed.attributes.find((a) => a.title.toLowerCase() === "brand")?.value ?? null,
+    brand: parsed.attributes.find((a) => a.title.toLowerCase() === "brand")?.value ?? entity.brand ?? null,
     entity_type: note.entity_type as EntityType,
     intent: note.intent || entity.intent,
     intent_utterance: entity.intent_utterance ?? "",
@@ -119,6 +132,10 @@ function nodeToAgendaItem(note: ConvNote, entity: RawEntity): AgendaItem {
     tags: note.topic ? [note.topic] : [],
   }
   mergeAttrs(item, entity.attributes)
+  // Mirror makeAgendaItem: synthesize Brand attr from item.brand if missing, so the brand hub + edge are created on re-open.
+  if (item.brand && !item.attributes.some((a) => a.title.toLowerCase() === "brand")) {
+    item.attributes.unshift({ title: "Brand", value: item.brand })
+  }
   const tier1Missing = getTier1Missing(item.entity_type, attrsToContentMd(item.attributes))
   item.missing = tier1Missing
   item.tier1_complete = tier1Missing.length === 0
@@ -195,7 +212,8 @@ async function writeEntityToVault(
   supabase: ReturnType<typeof createAdminClient>,
   userId: string,
   conversationId: string,
-  item: AgendaItem
+  item: AgendaItem,
+  existingPath?: string
 ) {
   // Single write chokepoint — ensure a captured Name has become the title (mutates the
   // shared agenda item too, so #3's title-matching sees the stable name)
@@ -208,7 +226,8 @@ async function writeEntityToVault(
   const fullContent = incompleteHeader + [item.description, attrLines].filter(Boolean).join("\n\n")
 
   if (!item.brand) {
-    const entityPath = `${entityDir}/${toSlug(item.title)}.md`
+    // Re-opened nodes keep their original path so a later brand/name doesn't relocate them into a duplicate.
+    const entityPath = existingPath ?? `${entityDir}/${toSlug(item.title)}.md`
     const { data: entityNote } = await supabase
       .from("vault_notes")
       .upsert(
@@ -228,7 +247,8 @@ async function writeEntityToVault(
   if (item.entity_type === "brand" || !brandHubId) return
 
   // Item hangs under the brand: item/<brand>/<item>.md, linked to the brand/<brand>.md hub
-  const entityPath = `${entityDir}/${toSlug(item.brand)}/${toSlug(item.title)}.md`
+  // Re-opened nodes keep their original path so a later brand/name doesn't relocate them into a duplicate.
+  const entityPath = existingPath ?? `${entityDir}/${toSlug(item.brand)}/${toSlug(item.title)}.md`
   const { data: entityNote } = await supabase
     .from("vault_notes")
     .upsert(
@@ -268,7 +288,7 @@ export async function extractFacts(
 
   const { data: vaultNotes } = await supabase
     .from("vault_notes")
-    .select("title, topic, content_md, entity_type, intent")
+    .select("title, topic, content_md, entity_type, intent, path")
     .eq("user_id", userId)
     .eq("source", "conversation")
   const noteByTitle = new Map<string, ConvNote>()
@@ -312,21 +332,22 @@ export async function extractFacts(
 
   // Route detected entities: merge late facts into a known entity, else add as new.
   for (const entity of extraction.entities) {
-    const key = entity.title.toLowerCase()
+    // refines points at an existing entity this one refines; fall back to exact title.
+    const key = (entity.refines?.trim() || entity.title).toLowerCase()
 
     if (agenda.current && agenda.current.title.toLowerCase() === key) {
-      mergeAttrs(agenda.current, entity.attributes)
+      mergeEntity(agenda.current, entity)
       continue
     }
     const pendingMatch = agenda.pending.find((p) => p.title.toLowerCase() === key)
     if (pendingMatch) {
-      mergeAttrs(pendingMatch, entity.attributes)
+      mergeEntity(pendingMatch, entity)
       continue
     }
     // Already flushed → fold the late facts into the durable node now (re-open by title)
     const noteMatch = noteByTitle.get(key)
     if (noteMatch) {
-      await writeEntityToVault(supabase, userId, conversationId, nodeToAgendaItem(noteMatch, entity))
+      await writeEntityToVault(supabase, userId, conversationId, nodeToAgendaItem(noteMatch, entity), noteMatch.path)
       continue
     }
     const item = makeAgendaItem(entity)
@@ -340,7 +361,7 @@ export async function extractFacts(
   // (e.g. an entity still pending, not yet a node) are skipped; the model re-emits the
   // relation on later turns and the edge forms once both nodes exist (self-healing).
   const rels = extraction.entities.flatMap((e) =>
-    (e.relations ?? []).map((r) => ({ from: e.title, to: r.to, label: r.label }))
+    (e.relations ?? []).map((r) => ({ from: e.refines?.trim() || e.title, to: r.to, label: r.label }))
   )
   if (rels.length) {
     const { data: allNotes } = await supabase
@@ -376,23 +397,23 @@ export async function extractFacts(
   await supabase.from("conversations").update({ agenda }).eq("id", conversationId)
 }
 
-// Session close (farewell or 2h timeout). Hybrid persistence: intent-bearing entities
-// are banked to the vault now as incomplete nodes — the ad signal is cheap to capture
-// here and expensive to reconstruct, and they resurface via "Unfinished from last
-// session". Everything else is returned as survivors for the next session to carry
-// forward in its pending queue. Idempotent: recordIntent dedups, upserts are by path.
-export async function closeSession(conversationId: string, userId: string): Promise<AgendaItem[]> {
+// Session close (farewell or 2h timeout). Persist EVERY pending + current entity to the
+// vault now (incomplete flag when tier-1 unmet — writeEntityToVault sets it; recordIntent
+// fires for intent-bearing ones). Nothing mentioned is lost: complete ones become known
+// facts, incomplete ones resurface next session via "Unfinished from last session". The
+// agenda is emptied; the next conversation starts fresh. Idempotent: upserts are by path.
+export async function closeSession(conversationId: string, userId: string): Promise<void> {
   const supabase = createAdminClient()
   const { data: conv } = await supabase.from("conversations").select("agenda").eq("id", conversationId).single()
   const agenda: Agenda = (conv?.agenda as Agenda) ?? { current: null, pending: [] }
 
   const queue = [...(agenda.current ? [agenda.current] : []), ...agenda.pending]
-  const survivors: AgendaItem[] = []
   for (const item of queue) {
-    if (item.intent) await writeEntityToVault(supabase, userId, conversationId, item)
-    else survivors.push({ ...item, turns: 0, weight: 1 })
+    // Recompute completeness from the item's current attributes before writing.
+    const tier1Missing = getTier1Missing(item.entity_type, attrsToContentMd(item.attributes))
+    item.tier1_complete = tier1Missing.length === 0
+    await writeEntityToVault(supabase, userId, conversationId, item)
   }
 
-  await supabase.from("conversations").update({ agenda: { current: null, pending: survivors } }).eq("id", conversationId)
-  return survivors
+  await supabase.from("conversations").update({ agenda: { current: null, pending: [] } }).eq("id", conversationId)
 }

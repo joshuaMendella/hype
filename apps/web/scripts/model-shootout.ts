@@ -21,7 +21,7 @@ import {
   SYSTEM as EXTRACT_SYSTEM,
   SCHEMA as EXTRACT_SCHEMA,
   buildWindow,
-  agendaContext,
+  buildTrackingContext,
 } from "../lib/ai/synthesize"
 import { CHECKLIST_PROMPT, type Agenda } from "../lib/ai/checklists"
 
@@ -279,7 +279,7 @@ async function main() {
   console.log(`\n${line}`)
   console.log("PART 2 — EXTRACTION  (same window + agenda, real synthesize prompt/schema)")
   console.log(line)
-  const user = `${agendaContext(AGENDA)}\n\nConversation slice:\n${buildWindow(TRANSCRIPT)}`
+  const user = `${buildTrackingContext(AGENDA)}\n\nConversation slice:\n${buildWindow(TRANSCRIPT)}`
   const cereX = await cerebrasExtract(EXTRACT_SYSTEM, user); await sleep(DELAY)
   const gemX = await geminiExtract(EXTRACT_SYSTEM, user)
   summarizeExtraction("gpt-oss-120b", cereX)

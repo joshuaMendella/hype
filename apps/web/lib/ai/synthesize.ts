@@ -73,8 +73,12 @@ export const SCHEMA = {
               required: ["to", "label"],
             },
           },
+          refines: {
+            type: "string",
+            description: 'Exact title of an already-tracked/in-graph entity that THIS entity is the same as, or a more specific description of (e.g. tracked "Pants" and now "blue linen pants"). "" if this is a genuinely new thing.',
+          },
         },
-        required: ["title", "entity_type", "tags", "brand", "intent", "intent_confidence", "intent_utterance", "scheduled_for", "description", "attributes", "relations"],
+        required: ["title", "entity_type", "tags", "brand", "intent", "intent_confidence", "intent_utterance", "scheduled_for", "description", "attributes", "relations", "refines"],
       },
     },
   },
@@ -123,6 +127,17 @@ intent: true ONLY when the user expresses a forward-looking desire to acquire or
 ## tags
 1–2 topic labels per entity, each from the allowed enum. Tags describe the entity's themes; never invent labels outside the enum.
 
+## required attributes — always emit these (this is how the graph knows an entity is complete enough to keep)
+- item → **Category** (belt, shoes, laptop). Emit **Brand** only when a store is named.
+- place → **Name** when the place has a proper name (Galeria Rzeszow, Monmouth Coffee). Omit Name for a generic unnamed place ("the mall") — it stays a thread until named.
+- person → **Name** (if known) and **Relationship** (friend, sister, coworker).
+- event → **When** — a date or relative time ("next week", "in August"). The title says WHAT the event is; When says when.
+- brand → **Category** (coffee shop, clothing store). The brand's name is the title.
+Use these exact Title-Case attribute names. Never substitute (not "Timeframe" for When, not "Destination" for Where).
+
+## refines — collapse mentions of the same thing
+You are given the entities already tracked or in the graph (see "Currently tracking" and "Already tracked or in the graph"). If something mentioned this window is the SAME entity as one of those, or a more specific description of it (tracked "Pants" and now "blue linen pants"; tracked "Running shoes" and now "my Nikes"), do NOT create a new entity — set refines to that entity's EXACT title and put the new details in this entity's attributes. Only set refines to a title from that list; leave it "" for a genuinely new thing.
+
 ## relations
 For each entity, connect it to OTHER entities in this window that it genuinely relates to. Each relation is { to: <exact title of another entity>, label: <verb phrase, <=3 words> }. Natural patterns:
 - an event AT a place ("at"); an event WITH a person ("with")
@@ -140,10 +155,32 @@ export function buildWindow(messages: Array<{ role: "user" | "assistant"; conten
     .join("\n")
 }
 
-export function agendaContext(agenda: Agenda): string {
-  if (!agenda.current) return "Currently tracking: (nothing yet)"
-  const known = agenda.current.attributes.map((a) => a.title).join(", ") || "none"
-  return `Currently tracking: "${agenda.current.title}" (${agenda.current.entity_type}). Already have these attributes: ${known}.`
+export function buildTrackingContext(
+  agenda: Agenda,
+  knownNotes: Array<{ title: string; entity_type: string | null }> = []
+): string {
+  const lines: string[] = []
+  if (agenda.current) {
+    const known = agenda.current.attributes.map((a) => a.title).join(", ") || "none"
+    lines.push(`Currently tracking: "${agenda.current.title}" (${agenda.current.entity_type}). Already have these attributes: ${known}.`)
+  } else {
+    lines.push("Currently tracking: (nothing yet)")
+  }
+  // Everything else already known — the model must refine these, not re-create them.
+  const seen = new Set<string>(agenda.current ? [agenda.current.title.toLowerCase()] : [])
+  const others: string[] = []
+  for (const p of agenda.pending) {
+    const k = p.title.toLowerCase()
+    if (!seen.has(k)) { seen.add(k); others.push(`${p.title} (${p.entity_type})`) }
+  }
+  for (const n of knownNotes) {
+    const k = n.title.toLowerCase()
+    if (!seen.has(k)) { seen.add(k); others.push(`${n.title}${n.entity_type ? ` (${n.entity_type})` : ""}`) }
+  }
+  if (others.length) {
+    lines.push(`Already tracked or in the graph (do NOT re-create these — set refines to the exact title if a mention refers to one): ${others.join(", ")}.`)
+  }
+  return lines.join("\n")
 }
 
 type ParsedEntity = {
@@ -158,6 +195,7 @@ type ParsedEntity = {
   description: string
   attributes: Attr[]
   relations: { to: string; label: string }[]
+  refines: string
 }
 
 type RawParsed = { attributes: Attr[]; entities: ParsedEntity[] }
@@ -228,12 +266,13 @@ async function extractCerebras(userContent: string): Promise<RawParsed> {
 
 export async function synthesize(
   messages: Array<{ role: "user" | "assistant"; content: string }>,
-  agenda: Agenda
+  agenda: Agenda,
+  knownNotes: Array<{ title: string; entity_type: string | null }> = []
 ): Promise<ExtractionResult> {
   const empty: ExtractionResult = { attributes: [], entities: [] }
   if (!messages.length) return empty
 
-  const userContent = `${agendaContext(agenda)}\n\nConversation slice:\n${buildWindow(messages)}`
+  const userContent = `${buildTrackingContext(agenda, knownNotes)}\n\nConversation slice:\n${buildWindow(messages)}`
 
   // Gemini 2.5 Flash primary; Cerebras gpt-oss-120b one-call fallback.
   let parsed: RawParsed
@@ -266,8 +305,24 @@ export async function synthesize(
       description: e.description ?? "",
       attributes: e.attributes ?? [],
       relations: (e.relations ?? []).filter((r) => r?.to?.trim() && r?.label?.trim()).map((r) => ({ to: r.to.trim(), label: r.label.trim() })),
+      refines: e.refines?.trim() ? e.refines.trim() : undefined,
     }
   })
 
   return { attributes: parsed.attributes ?? [], entities }
+}
+
+// ponytail: one runnable check — `npx tsx lib/ai/synthesize.ts` from apps/web.
+if (process.argv[1] && process.argv[1].endsWith("synthesize.ts")) {
+  const assert = (c: boolean, m: string) => { if (!c) { console.error("FAIL:", m); process.exit(1) } }
+  const agenda = {
+    current: { title: "Pants", entity_type: "item", attributes: [{ title: "Category", value: "pants" }] },
+    pending: [{ title: "Starbucks", entity_type: "brand" }],
+  } as unknown as Agenda
+  const ctx = buildTrackingContext(agenda, [{ title: "Galeria Rzeszow", entity_type: "place" }])
+  assert(ctx.includes('Currently tracking: "Pants"'), "shows current entity")
+  assert(ctx.includes("Starbucks (brand)"), "lists pending entities")
+  assert(ctx.includes("Galeria Rzeszow (place)"), "lists known vault notes")
+  assert(!ctx.split("Already tracked")[1]?.includes("Pants"), "does not duplicate current into the known list")
+  console.log("synthesize.ts self-check OK")
 }
