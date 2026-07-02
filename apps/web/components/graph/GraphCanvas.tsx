@@ -86,13 +86,16 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
     // a brand. Items under a brand stay nested; everything else links straight to You.
     const profile = nodes.find((n) => n.path === "_profile.md")
     if (profile) {
-      const brandChildren = new Set(
+      // A node is a "child" if something points at it via a brand or relation edge — it nests
+      // under that parent and must NOT also get a You spoke, or the graph flattens back into a
+      // star. You links only to ROOTS (no incoming brand/relation edge). This is what creates depth.
+      const children = new Set(
         links
-          .filter((l) => l.link_type === "brand")
+          .filter((l) => l.link_type === "brand" || l.link_type === "relation")
           .map((l) => (typeof l.target === "string" ? l.target : (l.target as GraphNode).id))
       )
       for (const n of nodes) {
-        if (n.id === profile.id || brandChildren.has(n.id)) continue
+        if (n.id === profile.id || children.has(n.id)) continue
         links.push({ id: `self-${n.id}`, source: profile.id, target: n.id, anchor_text: null, link_type: "self" })
       }
     }
@@ -141,18 +144,24 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
       )
 
     // Links — a knowledge graph's appeal IS its connectedness, so keep edges readable.
-    // self (You→entity): soft white spine; brand: purple; tag (shared-topic): faint white.
+    // self (You→root): soft white spine; brand: purple; relation (entity→entity): stronger neutral.
     const linkStyle: Record<string, { stroke: string; width: number }> = {
-      self:  { stroke: "#ffffff33", width: 1.25 },
-      brand: { stroke: "#a78bfa45", width: 1.25 },
-      tag:   { stroke: "#ffffff1a", width: 1 },
+      self:     { stroke: "#ffffff33", width: 1.25 },
+      brand:    { stroke: "#a78bfa45", width: 1.25 },
+      relation: { stroke: "#ffffff4d", width: 1.25 },
     }
     const link = g.append("g")
       .selectAll("line")
       .data(links)
       .join("line")
-      .attr("stroke", (d) => (linkStyle[d.link_type ?? "tag"] ?? linkStyle.tag).stroke)
-      .attr("stroke-width", (d) => (linkStyle[d.link_type ?? "tag"] ?? linkStyle.tag).width)
+      .attr("stroke", (d) => (linkStyle[d.link_type ?? "relation"] ?? linkStyle.relation).stroke)
+      .attr("stroke-width", (d) => (linkStyle[d.link_type ?? "relation"] ?? linkStyle.relation).width)
+
+    // Relationship edges carry a label ("at", "with", …) — surface it on hover via a native
+    // <title> child. (Node tooltips are the rich HTML ones; edges just get the plain label.)
+    link.filter((d) => d.link_type === "relation" && !!d.anchor_text)
+      .append("title")
+      .text((d) => d.anchor_text ?? "")
 
     const node = g.append("g")
       .selectAll<SVGGElement, GraphNode>("g")
