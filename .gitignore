@@ -27,3 +27,9 @@ Thumbs.db
 *.log
 npm-debug.log*
 pnpm-debug.log*
+
+# Scratch / throwaway diagnostics
+scratch/
+
+# Design docs reviewed into CLAUDE.md (kept locally, not in repo)
+Hype__Suggestions.docx
