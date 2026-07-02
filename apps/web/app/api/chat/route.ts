@@ -17,19 +17,28 @@ const CEREBRAS_CHAT_MODEL = "gpt-oss-120b"
 
 type ChatMsg = { role: "user" | "assistant"; content: string }
 
-async function geminiChat(system: string, history: ChatMsg[]): Promise<string> {
+async function geminiChat(system: string, history: ChatMsg[], jsonSchema?: object): Promise<string> {
   if (!GEMINI_KEY) throw new Error("GEMINI_API_KEY not set")
   const contents = history.map((m) => ({
     role: m.role === "assistant" ? "model" : "user",
     parts: [{ text: m.content }],
   }))
+  // Gemini 400s on an empty contents array; a session opener has no history. Seed a minimal
+  // user turn so the model produces its opening line (per the prompt's Opening rules) instead
+  // of always failing over to Cerebras. (Cerebras accepts a system-only message; Gemini won't.)
+  if (contents.length === 0) contents.push({ role: "user", parts: [{ text: "(Start the conversation.)" }] })
+  const generationConfig: Record<string, unknown> = { temperature: 0.8, thinkingConfig: { thinkingBudget: 0 }, maxOutputTokens: 512 }
+  // Onboarding passes a schema so Gemini returns a guaranteed-parseable {reply, onboarding_complete}.
+  // Without it the model drifts to prose, the completion signal is lost, onboarded never flips true,
+  // and every turn stays on the onboarding path — so extraction never runs. Interview path passes none.
+  if (jsonSchema) { generationConfig.responseMimeType = "application/json"; generationConfig.responseSchema = jsonSchema }
   const res = await fetch(`${GEMINI_CHAT_URL}?key=${GEMINI_KEY}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       system_instruction: { parts: [{ text: system }] },
       contents,
-      generationConfig: { temperature: 0.8, thinkingConfig: { thinkingBudget: 0 }, maxOutputTokens: 512 },
+      generationConfig,
     }),
   })
   if (!res.ok) throw new Error(`gemini ${res.status}: ${await res.text().catch(() => "")}`)
@@ -56,6 +65,18 @@ async function cerebrasChat(system: string, history: ChatMsg[]): Promise<string>
   const raw = (msg.content || msg.reasoning || "").trim()
   if (!raw) throw new Error("cerebras: empty response")
   return raw
+}
+
+// Gemini structured-output schema for the onboarding turn (uppercase OpenAPI-subset types,
+// same shape synthesize.ts uses). Forces {reply, onboarding_complete} so the completion signal
+// is never lost to prose. extraction is omitted deliberately — onboarding never extracts.
+const ONBOARDING_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    reply: { type: "STRING" },
+    onboarding_complete: { type: "BOOLEAN" },
+  },
+  required: ["reply", "onboarding_complete"],
 }
 
 const SYSTEM_PROMPT = `You are a curious friend catching up with someone over text. You genuinely want to know how their life is going — what they're into, what they've been up to, what matters to them. As they talk, you quietly remember the details. You are openly an AI building their personal vault (they were told this at onboarding), so you never have to act covert — you just have to be good company.
@@ -143,6 +164,7 @@ During the session:
 
 Ending:
 - Don't end unilaterally. At a natural stopping point (you've covered a few things, or their energy dips), PROPOSE it as a question and let them decide — phrase it as thanks + an open door, not a verdict on the chat: "Thanks for sharing — anything else on your mind, or want to pick this up another time?" (Avoid "sounds like a good chat" / "this was great" — it reads like you're grading the conversation.) Then wait for their answer. Do not declare the session over on your own.
+- If you've floated the wrap and they keep talking instead of agreeing, drop it — do NOT re-propose it turn after turn (repeating "anything else on your mind?" verbatim is a dead giveaway). Engage with what they just said, or ask one fresh thing. Only raise wrapping again after a genuine new lull, and word it differently.
 - Only sign off once they agree, or when they say "bye", "gotta go", "talk later", or any farewell of their own.
 - Make the sign-off warm and personal, not a form letter: always include "Talk soon", plus a small touch that shows you listened — "Talk soon — enjoy the mall!" or "Talk soon, good luck with the shirt hunt." One short line.
 - After signing off, do not start a new thread. Let it end.
@@ -201,6 +223,14 @@ If the user explicitly asks to skip the intro ("skip this", "I know", "just star
   "onboarding_complete": false
 }
 Set onboarding_complete to true only on Step 5 when the user confirms they are ready to start.`
+
+// Short recap of the rules that break most (per session 7–12 live reviews), positioned last
+// so it's freshest at generation. Don't grow this — a long recap defeats the point.
+const REPLY_GUTCHECK = `## Before you send, gut-check:
+- One question, or a natural pair that reads as one thought — never a stack of asks.
+- Nothing above is re-asked — if it's in what you already know, weave it in, don't ask it.
+- Dig only as hard as they're into it; a passing mention gets one light question.
+- Don't end the chat yourself — if it feels done, propose it as a question and wait.`
 
 function buildAgendaContext(agenda: Agenda): string {
   if (!agenda.current) return ""
@@ -318,15 +348,29 @@ export async function POST(req: NextRequest) {
 
   const isOnboarding = profile?.onboarded === false
 
-  const vaultContext = vaultNotes
-    ?.filter((n) => n.content_md?.trim())
-    .map((n) => `### ${n.topic ? `[${n.topic}] ` : ""}${n.title}\n${n.content_md}`)
-    .join("\n\n") ?? ""
+  // Order the window so notes tied to what we're talking about lead — models weight the top
+  // of a long context more than the middle, so the connect-the-dots facts should come first.
+  // Stable sort: ties keep the query's recency order. (When the vault outgrows limit(20),
+  // swap this heuristic for graph-hop selection off vault_links.)
+  const currentTitle = agenda.current?.title?.toLowerCase()
+  const currentTags = new Set((agenda.current?.tags ?? []).map((t) => t.toLowerCase()))
+  const pendingTitles = new Set(agenda.pending.map((p) => p.title.toLowerCase()))
+  const relevance = (n: { title: string; topic: string | null }) => {
+    const t = n.title.toLowerCase()
+    if (currentTitle && t === currentTitle) return 3
+    if (pendingTitles.has(t)) return 2
+    if (n.topic && currentTags.has(n.topic.toLowerCase())) return 1
+    return 0
+  }
+  const orderedNotes = [...(vaultNotes ?? [])]
+    .filter((n) => n.content_md?.trim())
+    .sort((a, b) => relevance(b) - relevance(a))
 
-  const knownFacts = vaultNotes
-    ?.filter((n) => n.content_md?.trim())
-    .map((n) => `- ${n.title}`)
-    .join("\n") ?? ""
+  // Single fact block: the ### headers already list every captured title, so a separate
+  // "known facts" title list was just duplicating these bytes. Header carries the don't-re-ask rule.
+  const vaultContext = orderedNotes
+    .map((n) => `### ${n.topic ? `[${n.topic}] ` : ""}${n.title}\n${n.content_md}`)
+    .join("\n\n")
 
   const todayContext = todayEvents?.length
     ? `\n\n## Scheduled for today:\n${todayEvents.map((e) => `- ${e.title}${e.topic ? ` (${e.topic})` : ""}`).join("\n")}\nOpen with one of these if it likely already happened, or wish them well if upcoming.`
@@ -349,13 +393,16 @@ export async function POST(req: NextRequest) {
     ? ONBOARDING_PROMPT.replace("[name]", profile?.display_name ?? "there")
     : [
         SYSTEM_PROMPT,
-        vaultContext ? `## What you already know about this person:\n${vaultContext}` : "",
-        knownFacts ? `## Already captured — do NOT re-ask:\n${knownFacts}` : "",
+        vaultContext ? `## What you already know about this person (already captured — weave it in, never re-ask it):\n${vaultContext}` : "",
         incompleteThreads ? `## Unfinished from last session — pick these up naturally when relevant:\n${incompleteThreads}` : "",
         isNewSession && agenda.pending.length ? `## Carried over from last session — these were queued but not reached:\n${agenda.pending.map((p) => `- ${p.title} (${p.entity_type})`).join("\n")}` : "",
         todayContext,
         sessionContext,
         buildAgendaContext(agenda),
+        // Closing recap: the persona rules above compete with a wall of facts, and the facts
+        // are the freshest thing the model reads before generating. Re-state the 4 most-broken
+        // rules right at the generation point (recency) so they win the tie.
+        REPLY_GUTCHECK,
       ].filter(Boolean).join("\n\n")
 
   // strip [reviewer annotations] from user turns — stored raw in DB, invisible to LLM
@@ -367,7 +414,7 @@ export async function POST(req: NextRequest) {
   // Gemini 2.5 Flash primary; Cerebras gpt-oss-120b fallback.
   let raw: string
   try {
-    raw = await geminiChat(systemPrompt, history)
+    raw = await geminiChat(systemPrompt, history, isOnboarding ? ONBOARDING_SCHEMA : undefined)
   } catch (gemErr) {
     console.error("[chat] Gemini chat failed, falling back to Cerebras:", gemErr)
     try {
