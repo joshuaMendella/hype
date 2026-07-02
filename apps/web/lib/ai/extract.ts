@@ -49,6 +49,7 @@ export type RawEntity = {
   description: string
   attributes?: Attr[]
   relations?: { to: string; label: string }[]
+  refines?: string
 }
 export type ExtractionResult = { attributes: Attr[]; entities: RawEntity[] }
 
