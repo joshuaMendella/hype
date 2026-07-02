@@ -19,7 +19,24 @@ const CEREBRAS_URL = "https://api.cerebras.ai/v1/chat/completions"
 const CEREBRAS_KEY = process.env.CEREBRAS_API_KEY
 const CEREBRAS_MODEL = "gpt-oss-120b" // fallback; OpenAI-compatible strict json_schema
 
-const INTENT_MARKERS = ["want", "need", "looking for", "thinking about getting", "planning to", "going to get"]
+// Forward-looking phrasings that confirm a purchase/acquire intent. Kept broad on purpose:
+// natural speech says "looking to get" / "thinking of", not the textbook "looking for".
+const INTENT_MARKERS = [
+  "want", "need", "looking for", "looking to", "thinking of", "thinking about",
+  "planning to", "planning on", "going to get", "gonna get", "gonna grab",
+  "hoping to", "would like", "in the market", "shopping for", "pick up",
+]
+
+// A generic placeholder ("another mall", "the store", "a coffee shop") is not a real
+// Name — dropping it keeps a place's tier-1 Name unmet, so the node stays incomplete and
+// the interviewer circles back for the real name instead of closing on the placeholder.
+const GENERIC_PLACE = "mall|store|shop|place|spot|restaurant|cafe|coffee ?shop|bar|gym|park|market|salon|barber"
+const PLACEHOLDER_NAME = new RegExp(`^((the|a|an|another|some|that|this|my)\\s+)?(${GENERIC_PLACE})s?$|^(somewhere|someplace)$`, "i")
+function keepAttr(a: Attr): boolean {
+  if (!a.value?.trim()) return false
+  if (a.title?.toLowerCase() === "name" && PLACEHOLDER_NAME.test(a.value.trim())) return false
+  return true
+}
 
 const attrSchema = {
   type: "object",
@@ -143,6 +160,8 @@ For each entity, connect it to OTHER entities in this window that it genuinely r
 - an event AT a place ("at"); an event WITH a person ("with")
 - an item kept at or bought for a place ("for" / "kept at")
 - a person who lives in a place ("lives in")
+- a store/brand the user shops at, browses, or will check WHILE AT a place → relate that brand to the place ("at"). Only the place they are actually at, not one mentioned as elsewhere.
+- an item the user is shopping for and the store(s) they'll look for it in → relate the item to each of those stores ("shop at")
 Reuse the exact title of an entity you are also returning in this window — never invent a target that isn't one of the entities. Emit an empty array when nothing genuinely connects. Do not relate an entity to itself.
 
 Return only the structured JSON. Extract nothing if the slice contains no durable facts.`
@@ -303,13 +322,15 @@ export async function synthesize(
       intent_utterance: intent ? e.intent_utterance ?? "" : "",
       scheduled_for: e.scheduled_for?.trim() ? e.scheduled_for.trim() : null,
       description: e.description ?? "",
-      attributes: e.attributes ?? [],
+      // Drop blank-value and placeholder-Name attributes: neither may count toward tier-1
+      // (that prematurely flushed an unnamed place as a duplicate/placeholder node).
+      attributes: (e.attributes ?? []).filter(keepAttr),
       relations: (e.relations ?? []).filter((r) => r?.to?.trim() && r?.label?.trim()).map((r) => ({ to: r.to.trim(), label: r.label.trim() })),
       refines: e.refines?.trim() ? e.refines.trim() : undefined,
     }
   })
 
-  return { attributes: parsed.attributes ?? [], entities }
+  return { attributes: (parsed.attributes ?? []).filter(keepAttr), entities }
 }
 
 // ponytail: one runnable check — `npx tsx lib/ai/synthesize.ts` from apps/web.
@@ -324,5 +345,16 @@ if (process.argv[1] && process.argv[1].endsWith("synthesize.ts")) {
   assert(ctx.includes("Starbucks (brand)"), "lists pending entities")
   assert(ctx.includes("Galeria Rzeszow (place)"), "lists known vault notes")
   assert(!ctx.split("Already tracked")[1]?.includes("Pants"), "does not duplicate current into the known list")
+  // Marker gate must catch natural forward-looking phrasing, not just the textbook forms.
+  assert(INTENT_MARKERS.some((m) => "i might be looking to get a new pair of pants".includes(m)), "matches 'looking to get'")
+  assert(INTENT_MARKERS.some((m) => "i'm thinking of a pair of dark blue linen pants".includes(m)), "matches 'thinking of'")
+  // Placeholder Name must be dropped (place stays incomplete); real names kept.
+  const nameAttr = (v: string) => ({ title: "Name", value: v } as Attr)
+  assert(!keepAttr(nameAttr("another mall")), "drops 'another mall'")
+  assert(!keepAttr(nameAttr("the store")), "drops 'the store'")
+  assert(!keepAttr(nameAttr("mall")), "drops bare 'mall'")
+  assert(keepAttr(nameAttr("Galeria Rzeszow")), "keeps real name")
+  assert(keepAttr(nameAttr("the Louvre")), "keeps 'the Louvre'")
+  assert(keepAttr({ title: "Color", value: "the mall" } as Attr), "placeholder rule is Name-only")
   console.log("synthesize.ts self-check OK")
 }

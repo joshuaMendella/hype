@@ -221,17 +221,25 @@ async function writeEntityToVault(
   const entityDir = item.entity_type
   const primaryTopic = item.tags[0] ?? item.entity_type
 
+  // An intent-bearing item is a want, not a possession — read that off the node itself via a
+  // deterministic "New " prefix (not left to the model). Kept as a display/path title only;
+  // item.title stays the bare noun so agenda + refine-by-title matching is unaffected.
+  const displayTitle =
+    item.intent && item.entity_type === "item" && !/^new /i.test(item.title)
+      ? `New ${item.title}`
+      : item.title
+
   const incompleteHeader = item.tier1_complete ? "" : "---\nincomplete: true\n---\n\n"
   const attrLines = attrsToContentMd(item.attributes)
   const fullContent = incompleteHeader + [item.description, attrLines].filter(Boolean).join("\n\n")
 
   if (!item.brand) {
     // Re-opened nodes keep their original path so a later brand/name doesn't relocate them into a duplicate.
-    const entityPath = existingPath ?? `${entityDir}/${toSlug(item.title)}.md`
+    const entityPath = existingPath ?? `${entityDir}/${toSlug(displayTitle)}.md`
     const { data: entityNote } = await supabase
       .from("vault_notes")
       .upsert(
-        { user_id: userId, path: entityPath, title: item.title, topic: primaryTopic, entity_type: item.entity_type, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8 },
+        { user_id: userId, path: entityPath, title: displayTitle, topic: primaryTopic, entity_type: item.entity_type, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8 },
         { onConflict: "user_id,path" }
       )
       .select("id")
@@ -248,11 +256,11 @@ async function writeEntityToVault(
 
   // Item hangs under the brand: item/<brand>/<item>.md, linked to the brand/<brand>.md hub
   // Re-opened nodes keep their original path so a later brand/name doesn't relocate them into a duplicate.
-  const entityPath = existingPath ?? `${entityDir}/${toSlug(item.brand)}/${toSlug(item.title)}.md`
+  const entityPath = existingPath ?? `${entityDir}/${toSlug(item.brand)}/${toSlug(displayTitle)}.md`
   const { data: entityNote } = await supabase
     .from("vault_notes")
     .upsert(
-      { user_id: userId, path: entityPath, title: item.title, topic: primaryTopic, entity_type: item.entity_type, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8 },
+      { user_id: userId, path: entityPath, title: displayTitle, topic: primaryTopic, entity_type: item.entity_type, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8 },
       { onConflict: "user_id,path" }
     )
     .select("id")
@@ -292,7 +300,12 @@ export async function extractFacts(
     .eq("user_id", userId)
     .eq("source", "conversation")
   const noteByTitle = new Map<string, ConvNote>()
-  for (const n of (vaultNotes ?? []) as ConvNote[]) noteByTitle.set(n.title.toLowerCase(), n)
+  for (const n of (vaultNotes ?? []) as ConvNote[]) {
+    noteByTitle.set(n.title.toLowerCase(), n)
+    // Alias the bare noun so a re-emitted "Pants" re-opens the intent-prefixed "New pants" node.
+    const bare = n.title.replace(/^new /i, "").toLowerCase()
+    if (!noteByTitle.has(bare)) noteByTitle.set(bare, n)
+  }
 
   // Merge the drill-down bucket into the current entity buffer
   if (agenda.current && extraction.attributes.length) mergeAttrs(agenda.current, extraction.attributes)
