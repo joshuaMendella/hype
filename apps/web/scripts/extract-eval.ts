@@ -54,9 +54,20 @@ async function main() {
       agenda,
       [{ title: "Pants", entity_type: "item" }]
     )
+    // The refinement's details (blue/linen) must be captured SOMEWHERE — either the top-level
+    // attributes drill bucket (current-entity update) or a refines->Pants entity. Both are valid
+    // dedup; the only wrong outcome is a NEW UNLINKED item. Asserting capture first prevents a
+    // false green when the model returns zero entities.
+    const capturedInBucket = hasAttr(ext.attributes, "Color") || hasAttr(ext.attributes, "Material")
+    const pantsRefinement = ext.entities.find(
+      (e) => e.entity_type === "item" && (e.refines ?? "").toLowerCase() === "pants"
+    )
+    const capturedInRefinement = !!pantsRefinement &&
+      (hasAttr(pantsRefinement.attributes ?? [], "Color") || hasAttr(pantsRefinement.attributes ?? [], "Material"))
     const newBarePants = ext.entities.filter(
       (e) => e.entity_type === "item" && (e.refines ?? "").toLowerCase() !== "pants"
     )
+    assert(capturedInBucket || capturedInRefinement, "refinement details (Color/Material) are captured, not lost")
     assert(newBarePants.length === 0, "refinement of tracked 'Pants' does not spawn a new unlinked item")
   }
 
