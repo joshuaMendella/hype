@@ -390,23 +390,23 @@ export async function extractFacts(
   await supabase.from("conversations").update({ agenda }).eq("id", conversationId)
 }
 
-// Session close (farewell or 2h timeout). Hybrid persistence: intent-bearing entities
-// are banked to the vault now as incomplete nodes — the ad signal is cheap to capture
-// here and expensive to reconstruct, and they resurface via "Unfinished from last
-// session". Everything else is returned as survivors for the next session to carry
-// forward in its pending queue. Idempotent: recordIntent dedups, upserts are by path.
-export async function closeSession(conversationId: string, userId: string): Promise<AgendaItem[]> {
+// Session close (farewell or 2h timeout). Persist EVERY pending + current entity to the
+// vault now (incomplete flag when tier-1 unmet — writeEntityToVault sets it; recordIntent
+// fires for intent-bearing ones). Nothing mentioned is lost: complete ones become known
+// facts, incomplete ones resurface next session via "Unfinished from last session". The
+// agenda is emptied; the next conversation starts fresh. Idempotent: upserts are by path.
+export async function closeSession(conversationId: string, userId: string): Promise<void> {
   const supabase = createAdminClient()
   const { data: conv } = await supabase.from("conversations").select("agenda").eq("id", conversationId).single()
   const agenda: Agenda = (conv?.agenda as Agenda) ?? { current: null, pending: [] }
 
   const queue = [...(agenda.current ? [agenda.current] : []), ...agenda.pending]
-  const survivors: AgendaItem[] = []
   for (const item of queue) {
-    if (item.intent) await writeEntityToVault(supabase, userId, conversationId, item)
-    else survivors.push({ ...item, turns: 0, weight: 1 })
+    // Recompute completeness from the item's current attributes before writing.
+    const tier1Missing = getTier1Missing(item.entity_type, attrsToContentMd(item.attributes))
+    item.tier1_complete = tier1Missing.length === 0
+    await writeEntityToVault(supabase, userId, conversationId, item)
   }
 
-  await supabase.from("conversations").update({ agenda: { current: null, pending: survivors } }).eq("id", conversationId)
-  return survivors
+  await supabase.from("conversations").update({ agenda: { current: null, pending: [] } }).eq("id", conversationId)
 }
