@@ -107,7 +107,7 @@ function parseNote(md: string): { description: string; attributes: Attr[] } {
   return { description: descLines.join(" "), attributes }
 }
 
-type ConvNote = { title: string; topic: string | null; content_md: string | null; entity_type: string | null; intent: boolean | null }
+type ConvNote = { title: string; topic: string | null; content_md: string | null; entity_type: string | null; intent: boolean | null; path: string }
 
 // Reconstruct an AgendaItem from an already-flushed node, merging in newly-stated
 // attributes. Re-running writeEntityToVault on it upserts the SAME node (by path),
@@ -117,7 +117,7 @@ function nodeToAgendaItem(note: ConvNote, entity: RawEntity): AgendaItem {
   const item: AgendaItem = {
     title: note.title,
     topic: note.topic ?? note.entity_type ?? "",
-    brand: parsed.attributes.find((a) => a.title.toLowerCase() === "brand")?.value ?? null,
+    brand: parsed.attributes.find((a) => a.title.toLowerCase() === "brand")?.value ?? entity.brand ?? null,
     entity_type: note.entity_type as EntityType,
     intent: note.intent || entity.intent,
     intent_utterance: entity.intent_utterance ?? "",
@@ -132,6 +132,10 @@ function nodeToAgendaItem(note: ConvNote, entity: RawEntity): AgendaItem {
     tags: note.topic ? [note.topic] : [],
   }
   mergeAttrs(item, entity.attributes)
+  // Mirror makeAgendaItem: synthesize Brand attr from item.brand if missing, so the brand hub + edge are created on re-open.
+  if (item.brand && !item.attributes.some((a) => a.title.toLowerCase() === "brand")) {
+    item.attributes.unshift({ title: "Brand", value: item.brand })
+  }
   const tier1Missing = getTier1Missing(item.entity_type, attrsToContentMd(item.attributes))
   item.missing = tier1Missing
   item.tier1_complete = tier1Missing.length === 0
@@ -208,7 +212,8 @@ async function writeEntityToVault(
   supabase: ReturnType<typeof createAdminClient>,
   userId: string,
   conversationId: string,
-  item: AgendaItem
+  item: AgendaItem,
+  existingPath?: string
 ) {
   // Single write chokepoint — ensure a captured Name has become the title (mutates the
   // shared agenda item too, so #3's title-matching sees the stable name)
@@ -221,7 +226,8 @@ async function writeEntityToVault(
   const fullContent = incompleteHeader + [item.description, attrLines].filter(Boolean).join("\n\n")
 
   if (!item.brand) {
-    const entityPath = `${entityDir}/${toSlug(item.title)}.md`
+    // Re-opened nodes keep their original path so a later brand/name doesn't relocate them into a duplicate.
+    const entityPath = existingPath ?? `${entityDir}/${toSlug(item.title)}.md`
     const { data: entityNote } = await supabase
       .from("vault_notes")
       .upsert(
@@ -241,7 +247,8 @@ async function writeEntityToVault(
   if (item.entity_type === "brand" || !brandHubId) return
 
   // Item hangs under the brand: item/<brand>/<item>.md, linked to the brand/<brand>.md hub
-  const entityPath = `${entityDir}/${toSlug(item.brand)}/${toSlug(item.title)}.md`
+  // Re-opened nodes keep their original path so a later brand/name doesn't relocate them into a duplicate.
+  const entityPath = existingPath ?? `${entityDir}/${toSlug(item.brand)}/${toSlug(item.title)}.md`
   const { data: entityNote } = await supabase
     .from("vault_notes")
     .upsert(
@@ -281,7 +288,7 @@ export async function extractFacts(
 
   const { data: vaultNotes } = await supabase
     .from("vault_notes")
-    .select("title, topic, content_md, entity_type, intent")
+    .select("title, topic, content_md, entity_type, intent, path")
     .eq("user_id", userId)
     .eq("source", "conversation")
   const noteByTitle = new Map<string, ConvNote>()
@@ -340,7 +347,7 @@ export async function extractFacts(
     // Already flushed → fold the late facts into the durable node now (re-open by title)
     const noteMatch = noteByTitle.get(key)
     if (noteMatch) {
-      await writeEntityToVault(supabase, userId, conversationId, nodeToAgendaItem(noteMatch, entity))
+      await writeEntityToVault(supabase, userId, conversationId, nodeToAgendaItem(noteMatch, entity), noteMatch.path)
       continue
     }
     const item = makeAgendaItem(entity)
