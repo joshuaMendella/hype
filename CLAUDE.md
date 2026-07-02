@@ -113,7 +113,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 ## START OF NEXT SESSION checklist
 1. Run `git log --oneline -5` to confirm state
 2. Run `cd apps/web && pnpm dev` to start the dev server
-3. Chat runs on Cerebras gpt-oss-120b (plain text). Extraction runs on **Gemini 2.5 Flash primary** (GEMINI_API_KEY) with Cerebras gpt-oss-120b as fallback — `lib/ai/synthesize.ts`, separate structured-output call. Both keys in .env.local; no Anthropic key needed.
+3. Chat AND extraction both run on **Gemini 2.5 Flash primary** (GEMINI_API_KEY), with **Cerebras gpt-oss-120b as fallback** (CEREBRAS_API_KEY) if Gemini fails/rate-limits. Chat = `app/api/chat/route.ts` (`geminiChat`→`cerebrasChat`), plain text on the interview path. Extraction = `lib/ai/synthesize.ts`, separate structured-output call. Both keys in .env.local; no Anthropic key needed.
 4. To reset everything for testing: `/hypereset` (wipes vault, clears agenda, resets onboarding flag)
 5. Root "You" node is always at path `_profile.md`, topic `Profile` — extraction depends on this
 6. `.mcp.json` is gitignored — Supabase MCP needs `SUPABASE_ACCESS_TOKEN` set locally in the file (not committed)
