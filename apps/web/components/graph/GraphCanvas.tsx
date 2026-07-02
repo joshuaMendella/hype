@@ -86,14 +86,36 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
     // a brand. Items under a brand stay nested; everything else links straight to You.
     const profile = nodes.find((n) => n.path === "_profile.md")
     if (profile) {
-      const brandChildren = new Set(
-        links
-          .filter((l) => l.link_type === "brand")
-          .map((l) => (typeof l.target === "string" ? l.target : (l.target as GraphNode).id))
-      )
+      const targetId = (l: GraphLink) => (typeof l.target === "string" ? l.target : (l.target as GraphNode).id)
+      const sourceId = (l: GraphLink) => (typeof l.source === "string" ? l.source : (l.source as GraphNode).id)
+      const structuralLinks = links.filter((l) => l.link_type === "brand" || l.link_type === "relation")
+      const children = new Set(structuralLinks.map(targetId))
+
+      // You links to every ROOT (no incoming brand/relation edge); children nest under their parent.
+      // But a pure cycle (e.g. event--"at"-->place + place--"hosts"-->event) has NO root, so the
+      // root-only rule alone would leave its whole component floating free of You — the exact
+      // "floating dot" this feature exists to prevent. Union-find the brand/relation graph and
+      // anchor any rootless component to You with a single self edge.
+      const parent = new Map<string, string>()
+      for (const n of nodes) if (n.id !== profile.id) parent.set(n.id, n.id)
+      const find = (x: string): string => { let r = x; while (parent.get(r) !== r) r = parent.get(r)!; return r }
+      for (const l of structuralLinks) {
+        const s = sourceId(l), t = targetId(l)
+        if (parent.has(s) && parent.has(t)) parent.set(find(s), find(t))
+      }
+      const rootedComponents = new Set<string>()
+      for (const n of nodes) if (n.id !== profile.id && !children.has(n.id)) rootedComponents.add(find(n.id))
+
+      const anchoredRootless = new Set<string>()
       for (const n of nodes) {
-        if (n.id === profile.id || brandChildren.has(n.id)) continue
-        links.push({ id: `self-${n.id}`, source: profile.id, target: n.id, anchor_text: null, link_type: "self" })
+        if (n.id === profile.id) continue
+        const comp = find(n.id)
+        const isRoot = !children.has(n.id)
+        const anchorRootless = !isRoot && !rootedComponents.has(comp) && !anchoredRootless.has(comp)
+        if (anchorRootless) anchoredRootless.add(comp)
+        if (isRoot || anchorRootless) {
+          links.push({ id: `self-${n.id}`, source: profile.id, target: n.id, anchor_text: null, link_type: "self" })
+        }
       }
     }
 
@@ -141,18 +163,24 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
       )
 
     // Links — a knowledge graph's appeal IS its connectedness, so keep edges readable.
-    // self (You→entity): soft white spine; brand: purple; tag (shared-topic): faint white.
+    // self (You→root): soft white spine; brand: purple; relation (entity→entity): stronger neutral.
     const linkStyle: Record<string, { stroke: string; width: number }> = {
-      self:  { stroke: "#ffffff33", width: 1.25 },
-      brand: { stroke: "#a78bfa45", width: 1.25 },
-      tag:   { stroke: "#ffffff1a", width: 1 },
+      self:     { stroke: "#ffffff33", width: 1.25 },
+      brand:    { stroke: "#a78bfa45", width: 1.25 },
+      relation: { stroke: "#ffffff4d", width: 1.25 },
     }
     const link = g.append("g")
       .selectAll("line")
       .data(links)
       .join("line")
-      .attr("stroke", (d) => (linkStyle[d.link_type ?? "tag"] ?? linkStyle.tag).stroke)
-      .attr("stroke-width", (d) => (linkStyle[d.link_type ?? "tag"] ?? linkStyle.tag).width)
+      .attr("stroke", (d) => (linkStyle[d.link_type ?? "relation"] ?? linkStyle.relation).stroke)
+      .attr("stroke-width", (d) => (linkStyle[d.link_type ?? "relation"] ?? linkStyle.relation).width)
+
+    // Relationship edges carry a label ("at", "with", …) — surface it on hover via a native
+    // <title> child. (Node tooltips are the rich HTML ones; edges just get the plain label.)
+    link.filter((d) => d.link_type === "relation" && !!d.anchor_text)
+      .append("title")
+      .text((d) => d.anchor_text ?? "")
 
     const node = g.append("g")
       .selectAll<SVGGElement, GraphNode>("g")

@@ -60,8 +60,21 @@ export const SCHEMA = {
           scheduled_for: { type: "string", description: "ISO date if this is a dated event, empty otherwise" },
           description: { type: "string", description: "one-sentence summary" },
           attributes: { type: "array", items: attrSchema },
+          relations: {
+            type: "array",
+            description: "Links from THIS entity to OTHER entities in this window that it genuinely relates to. Empty array if none.",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                to: { type: "string", description: "exact title of another entity in this window" },
+                label: { type: "string", description: "short verb phrase for the relationship, <=3 words: at, with, hosts, for, lives in" },
+              },
+              required: ["to", "label"],
+            },
+          },
         },
-        required: ["title", "entity_type", "tags", "brand", "intent", "intent_confidence", "intent_utterance", "scheduled_for", "description", "attributes"],
+        required: ["title", "entity_type", "tags", "brand", "intent", "intent_confidence", "intent_utterance", "scheduled_for", "description", "attributes", "relations"],
       },
     },
   },
@@ -110,6 +123,13 @@ intent: true ONLY when the user expresses a forward-looking desire to acquire or
 ## tags
 1–2 topic labels per entity, each from the allowed enum. Tags describe the entity's themes; never invent labels outside the enum.
 
+## relations
+For each entity, connect it to OTHER entities in this window that it genuinely relates to. Each relation is { to: <exact title of another entity>, label: <verb phrase, <=3 words> }. Natural patterns:
+- an event AT a place ("at"); an event WITH a person ("with")
+- an item kept at or bought for a place ("for" / "kept at")
+- a person who lives in a place ("lives in")
+Reuse the exact title of an entity you are also returning in this window — never invent a target that isn't one of the entities. Emit an empty array when nothing genuinely connects. Do not relate an entity to itself.
+
 Return only the structured JSON. Extract nothing if the slice contains no durable facts.`
 
 export function buildWindow(messages: Array<{ role: "user" | "assistant"; content: string }>): string {
@@ -137,6 +157,7 @@ type ParsedEntity = {
   scheduled_for: string
   description: string
   attributes: Attr[]
+  relations: { to: string; label: string }[]
 }
 
 type RawParsed = { attributes: Attr[]; entities: ParsedEntity[] }
@@ -244,6 +265,7 @@ export async function synthesize(
       scheduled_for: e.scheduled_for?.trim() ? e.scheduled_for.trim() : null,
       description: e.description ?? "",
       attributes: e.attributes ?? [],
+      relations: (e.relations ?? []).filter((r) => r?.to?.trim() && r?.label?.trim()).map((r) => ({ to: r.to.trim(), label: r.label.trim() })),
     }
   })
 

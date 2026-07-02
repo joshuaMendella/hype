@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin"
 import { type Agenda, type AgendaItem } from "./checklists"
 import { getTier1Missing, type EntityType } from "./entityTypes"
 import { affiliateCategory } from "@/lib/ads/categories"
+import { resolveRelation } from "./relations"
 
 // Intents are the advertiser layer's core signal: cheap to bank now, expensive to
 // reconstruct later. One open row per intent-bearing entity, with an expiry.
@@ -47,6 +48,7 @@ export type RawEntity = {
   scheduled_for: string | null
   description: string
   attributes?: Attr[]
+  relations?: { to: string; label: string }[]
 }
 export type ExtractionResult = { attributes: Attr[]; entities: RawEntity[] }
 
@@ -205,32 +207,6 @@ async function writeEntityToVault(
   const attrLines = attrsToContentMd(item.attributes)
   const fullContent = incompleteHeader + [item.description, attrLines].filter(Boolean).join("\n\n")
 
-  // Create shared-tag edges to other conversation notes with the same topic
-  async function linkByTag(entityNoteId: string) {
-    const { data: peers } = await supabase
-      .from("vault_notes")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("topic", primaryTopic)
-      .eq("source", "conversation")
-      .neq("id", entityNoteId)
-      .order("created_at", { ascending: false })
-      .limit(5)
-
-    if (peers?.length) {
-      await supabase.from("vault_links").upsert(
-        peers.map((p) => ({
-          user_id: userId,
-          source_note_id: entityNoteId,
-          target_note_id: p.id,
-          link_type: "tag",
-          anchor_text: primaryTopic,
-        })),
-        { onConflict: "source_note_id,target_note_id", ignoreDuplicates: true }
-      )
-    }
-  }
-
   if (!item.brand) {
     const entityPath = `${entityDir}/${toSlug(item.title)}.md`
     const { data: entityNote } = await supabase
@@ -243,7 +219,6 @@ async function writeEntityToVault(
       .single()
     if (!entityNote) return
     await supabase.from("extractions").insert({ conversation_id: conversationId, note_id: entityNote.id })
-    await linkByTag(entityNote.id)
     await recordIntent(supabase, userId, item, entityNote.id)
     return
   }
@@ -269,7 +244,6 @@ async function writeEntityToVault(
     { onConflict: "source_note_id,target_note_id" }
   )
   await supabase.from("extractions").insert({ conversation_id: conversationId, note_id: entityNote.id })
-  await linkByTag(entityNote.id)
   await recordIntent(supabase, userId, item, entityNote.id)
 }
 
@@ -358,6 +332,45 @@ export async function extractFacts(
     const item = makeAgendaItem(entity)
     if (!agenda.current) agenda.current = item
     else agenda.pending.push(item)
+  }
+
+  // Relationship post-pass: connect entities to each other with model-emitted labels.
+  // Best-effort — re-query all conversation nodes (now that this turn's writes have landed),
+  // resolve source+target titles to ids, upsert 'relation' edges. Unresolved endpoints
+  // (e.g. an entity still pending, not yet a node) are skipped; the model re-emits the
+  // relation on later turns and the edge forms once both nodes exist (self-healing).
+  const rels = extraction.entities.flatMap((e) =>
+    (e.relations ?? []).map((r) => ({ from: e.title, to: r.to, label: r.label }))
+  )
+  if (rels.length) {
+    const { data: allNotes } = await supabase
+      .from("vault_notes")
+      .select("id, title")
+      .eq("user_id", userId)
+      .eq("source", "conversation")
+    // Resolved against CURRENT titles — pre-rename refs (e.g. "Mall" before "Galeria Rzeszow") silently miss and self-heal when re-emitted with the final title.
+    const idByTitle = new Map<string, string>()
+    for (const n of allNotes ?? []) idByTitle.set(n.title.toLowerCase(), n.id)
+
+    const edges = []
+    const seen = new Set<string>()
+    for (const rel of rels) {
+      const resolved = resolveRelation(idByTitle, rel.from, rel.to)
+      if (!resolved) continue
+      const key = `${resolved.source}->${resolved.target}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      edges.push({
+        user_id: userId,
+        source_note_id: resolved.source,
+        target_note_id: resolved.target,
+        link_type: "relation" as const,
+        anchor_text: rel.label.slice(0, 40),
+      })
+    }
+    if (edges.length) {
+      await supabase.from("vault_links").upsert(edges, { onConflict: "source_note_id,target_note_id", ignoreDuplicates: true })
+    }
   }
 
   await supabase.from("conversations").update({ agenda }).eq("id", conversationId)
