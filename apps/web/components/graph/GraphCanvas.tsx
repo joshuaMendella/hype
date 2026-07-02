@@ -86,17 +86,36 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
     // a brand. Items under a brand stay nested; everything else links straight to You.
     const profile = nodes.find((n) => n.path === "_profile.md")
     if (profile) {
-      // A node is a "child" if something points at it via a brand or relation edge — it nests
-      // under that parent and must NOT also get a You spoke, or the graph flattens back into a
-      // star. You links only to ROOTS (no incoming brand/relation edge). This is what creates depth.
-      const children = new Set(
-        links
-          .filter((l) => l.link_type === "brand" || l.link_type === "relation")
-          .map((l) => (typeof l.target === "string" ? l.target : (l.target as GraphNode).id))
-      )
+      const targetId = (l: GraphLink) => (typeof l.target === "string" ? l.target : (l.target as GraphNode).id)
+      const sourceId = (l: GraphLink) => (typeof l.source === "string" ? l.source : (l.source as GraphNode).id)
+      const structuralLinks = links.filter((l) => l.link_type === "brand" || l.link_type === "relation")
+      const children = new Set(structuralLinks.map(targetId))
+
+      // You links to every ROOT (no incoming brand/relation edge); children nest under their parent.
+      // But a pure cycle (e.g. event--"at"-->place + place--"hosts"-->event) has NO root, so the
+      // root-only rule alone would leave its whole component floating free of You — the exact
+      // "floating dot" this feature exists to prevent. Union-find the brand/relation graph and
+      // anchor any rootless component to You with a single self edge.
+      const parent = new Map<string, string>()
+      for (const n of nodes) if (n.id !== profile.id) parent.set(n.id, n.id)
+      const find = (x: string): string => { let r = x; while (parent.get(r) !== r) r = parent.get(r)!; return r }
+      for (const l of structuralLinks) {
+        const s = sourceId(l), t = targetId(l)
+        if (parent.has(s) && parent.has(t)) parent.set(find(s), find(t))
+      }
+      const rootedComponents = new Set<string>()
+      for (const n of nodes) if (n.id !== profile.id && !children.has(n.id)) rootedComponents.add(find(n.id))
+
+      const anchoredRootless = new Set<string>()
       for (const n of nodes) {
-        if (n.id === profile.id || children.has(n.id)) continue
-        links.push({ id: `self-${n.id}`, source: profile.id, target: n.id, anchor_text: null, link_type: "self" })
+        if (n.id === profile.id) continue
+        const comp = find(n.id)
+        const isRoot = !children.has(n.id)
+        const anchorRootless = !isRoot && !rootedComponents.has(comp) && !anchoredRootless.has(comp)
+        if (anchorRootless) anchoredRootless.add(comp)
+        if (isRoot || anchorRootless) {
+          links.push({ id: `self-${n.id}`, source: profile.id, target: n.id, anchor_text: null, link_type: "self" })
+        }
       }
     }
 

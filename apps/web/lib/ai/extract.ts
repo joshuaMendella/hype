@@ -348,6 +348,7 @@ export async function extractFacts(
       .select("id, title")
       .eq("user_id", userId)
       .eq("source", "conversation")
+    // Resolved against CURRENT titles — pre-rename refs (e.g. "Mall" before "Galeria Rzeszow") silently miss and self-heal when re-emitted with the final title.
     const idByTitle = new Map<string, string>()
     for (const n of allNotes ?? []) idByTitle.set(n.title.toLowerCase(), n.id)
 
