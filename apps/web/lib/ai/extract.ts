@@ -59,6 +59,18 @@ function attrsToContentMd(attrs: Attr[]): string {
   return attrs.map((a) => `- **${a.title}**: ${a.value}${a.inferred ? " *(inferred)*" : ""}`).join("\n")
 }
 
+// Merge an incoming extracted entity into an existing tracked agenda item: fold its
+// attributes (via mergeAttrs) and carry a forward-looking intent it may bring ("I need
+// blue linen pants" refining the tracked "Pants"). The target keeps its canonical title.
+function mergeEntity(target: AgendaItem, entity: RawEntity) {
+  mergeAttrs(target, entity.attributes)
+  if (entity.intent && !target.intent) {
+    target.intent = true
+    target.intent_utterance = entity.intent_utterance ?? ""
+    target.intent_confidence = entity.intent_confidence ?? 0
+  }
+}
+
 // A place's or person's identity is its name. Once a Name attribute arrives, adopt it
 // as the title so the node isn't stranded under a generic placeholder ("Mall" →
 // "Galeria Rzeszow"). Items keep their category-noun title (they have no Name).
@@ -313,15 +325,16 @@ export async function extractFacts(
 
   // Route detected entities: merge late facts into a known entity, else add as new.
   for (const entity of extraction.entities) {
-    const key = entity.title.toLowerCase()
+    // refines points at an existing entity this one refines; fall back to exact title.
+    const key = (entity.refines?.trim() || entity.title).toLowerCase()
 
     if (agenda.current && agenda.current.title.toLowerCase() === key) {
-      mergeAttrs(agenda.current, entity.attributes)
+      mergeEntity(agenda.current, entity)
       continue
     }
     const pendingMatch = agenda.pending.find((p) => p.title.toLowerCase() === key)
     if (pendingMatch) {
-      mergeAttrs(pendingMatch, entity.attributes)
+      mergeEntity(pendingMatch, entity)
       continue
     }
     // Already flushed → fold the late facts into the durable node now (re-open by title)
@@ -341,7 +354,7 @@ export async function extractFacts(
   // (e.g. an entity still pending, not yet a node) are skipped; the model re-emits the
   // relation on later turns and the edge forms once both nodes exist (self-healing).
   const rels = extraction.entities.flatMap((e) =>
-    (e.relations ?? []).map((r) => ({ from: e.title, to: r.to, label: r.label }))
+    (e.relations ?? []).map((r) => ({ from: e.refines?.trim() || e.title, to: r.to, label: r.label }))
   )
   if (rels.length) {
     const { data: allNotes } = await supabase
