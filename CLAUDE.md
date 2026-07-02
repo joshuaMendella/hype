@@ -32,7 +32,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - RLS enabled on all tables — users can only access their own data
 - Three Supabase clients: `lib/supabase/client.ts` (browser), `lib/supabase/server.ts` (SSR), `lib/supabase/admin.ts` (server-only, bypasses RLS)
 
-## What's been built (as of 2026-06-28, updated session 10)
+## What's been built (as of 2026-07-02, updated session 13)
 - [x] Monorepo scaffold (Turborepo, pnpm, TypeScript)
 - [x] Next.js app scaffolded in apps/web
 - [x] Supabase schema: profiles, vault_notes, vault_links, conversations, messages, extractions
@@ -96,6 +96,13 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
   - Also **hardened `/hypereset`** (`.claude/skills/hypereset/SKILL.md`) to clear `intents` + `messages` + `conversations` (was leaving stale message history and the Phase 4 `intents` table untouched; pending was already cleared).
   - **Still to live-test (next session):** (a) #5's actual phrasing behavior; (b) the full **farewell → reload → carryover** loop end-to-end (closeSession + opening-read were verified separately, not driven through two live requests). Test plan: `/hypereset` → one conversation: mall → name it → drop frequency/location a few turns later → say you "need" a shirt → say bye. Watch the graph; confirm single brand nodes, the named mall completing, the shirt intent banked, and a warm confirm-then-sign-off.
   - **Note:** session 12's DB-level verification used an ad-hoc `npx tsx` harness (load `.env.local`, dynamic-import via `pathToFileURL`, insert a conversation with a synthetic agenda, call the real exported fn, assert + clean up). Those scratch files do **not** persist across sessions — recreate if needed. There is no committed test runner in the project.
+- [x] **Session 13 — clean-slate extraction reproduction verified (commit `52256cd`, `main`)** — Re-ran the session-12 fixes against a fresh `/hypereset` conversation (mall → name it → pants + plant purchase intents → stores → second mall). This time the correct graph reproduced **automatically, no manual backfill**: single brand/place node per entity, both intents banked to `intents` (fashion/pants + home-kitchen/plant), store↔mall + item↔store relation edges auto-created. Five fixes committed (tsc + self-checks clean):
+  - **Intent markers broadened** (`synthesize.ts INTENT_MARKERS`) — added "looking to", "thinking of/about", "planning on", "gonna get/grab", "hoping to", "would like", "in the market", "shopping for", "pick up". Root cause of the dropped plant/pants intent: the gate's phrase list was too literal ("looking to get" ≠ "looking for"). Gemini flags intent correctly; the marker gate was silently downgrading it.
+  - **Blank-value attrs filtered** at the synthesize boundary (`keepAttr`) — an empty `Name` no longer counts toward a place's tier-1, which had been flushing an unnamed place as a duplicate node.
+  - **Placeholder Name dropped** (`keepAttr` + `PLACEHOLDER_NAME`) — a generic value ("another mall", "the store", bare "mall") is not adopted as a Name, so the place stays **incomplete** and the interviewer circles back for the real name. Regex is Name-only and whitelists the article form to generic place-nouns, so real names ("the Louvre", "Galeria Rzeszow") survive.
+  - **Deterministic intent-item title** (`extract.ts writeEntityToVault`) — a purchase-intent item gets a code-derived `New ` prefix (`New pants` → `item/new-pants.md`), independent of the model; `extractFacts` aliases the bare noun in `noteByTitle` so a re-emitted "pants" re-opens the same node instead of duplicating. (Graph-structure decision: intent baked into the title.)
+  - **Relation prompt patterns** (`synthesize.ts SYSTEM`) — brand↔place ("at") and item↔store ("shop at") edges now emit; wires stores to the mall they're in and shopping-intent items to the stores they'll be found in.
+  - **Deferred:** narrowing the item→place relation (New pants picked up a stray link to the mall, not just the stores) — low-priority edge noise, left for later per owner.
 
 ## Claude Code plugins installed (user-scoped, active next session)
 - `context-mode` — keeps large outputs out of context window (was pre-installed)
@@ -106,12 +113,12 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 ## START OF NEXT SESSION checklist
 1. Run `git log --oneline -5` to confirm state
 2. Run `cd apps/web && pnpm dev` to start the dev server
-3. Chat AND extraction both run on Cerebras gpt-oss-120b (free tier) — CEREBRAS_API_KEY in .env.local. Chat = conversational reply (plain text); extraction = separate strict-json_schema call in lib/ai/synthesize.ts. No Anthropic key needed.
+3. Chat runs on Cerebras gpt-oss-120b (plain text). Extraction runs on **Gemini 2.5 Flash primary** (GEMINI_API_KEY) with Cerebras gpt-oss-120b as fallback — `lib/ai/synthesize.ts`, separate structured-output call. Both keys in .env.local; no Anthropic key needed.
 4. To reset everything for testing: `/hypereset` (wipes vault, clears agenda, resets onboarding flag)
 5. Root "You" node is always at path `_profile.md`, topic `Profile` — extraction depends on this
 6. `.mcp.json` is gitignored — Supabase MCP needs `SUPABASE_ACCESS_TOKEN` set locally in the file (not committed)
-7. **Immediate focus: live-test the session-12 fixes** (see the session-12 entry above for the test plan + the two pending live checks: #5 phrasing, farewell→reload→carryover loop). Fine-tune the persona prompt from the real conversation.
-8. Then: landing page at / ("Be in control of your ads" + "Build your personal graph"), then Vercel deploy
+7. **Extraction graph is verified clean-slate (session 13).** Still open on extraction: (a) narrow the item→place relation (intent items pick up a stray link to the mall, not just the stores); (b) session-12 #5 persona phrasing (confirm-before-ending, warm sign-off) + the farewell→reload→carryover loop remain live-test pending.
+8. **Immediate focus: landing page at /** ("Be in control of your ads" + "Build your personal graph"), then Vercel deploy
 
 ## Key extraction rules (updated session 9)
 - Entity-centric graph: entity-type hub → Brand hub → Item (vault paths: `item/zara/belt.md`, `place/monmouth-coffee.md`)
