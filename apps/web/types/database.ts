@@ -54,7 +54,7 @@ export interface VaultLink {
   source_note_id: string
   target_note_id: string
   anchor_text: string | null
-  link_type: "brand" | "tag" | null
+  link_type: "brand" | "tag" | "relation" | null
   created_at: string
 }
 
@@ -107,7 +107,7 @@ export interface GraphLink {
   target: string | GraphNode
   anchor_text: string | null
   // "self" edges are synthesized client-side (You → top-level entity); never persisted.
-  link_type: "brand" | "tag" | "self" | null
+  link_type: "brand" | "tag" | "relation" | "self" | null
 }
 
 export interface GraphData {
