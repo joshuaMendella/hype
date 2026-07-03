@@ -10,6 +10,36 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  /* Landing page faces — usable as font-display / font-body utilities */
+  --font-display: var(--font-space-grotesk);
+  --font-body: var(--font-inter);
+}
+
+/* ── Landing page motion ─────────────────────────────────────────────
+   Scroll-reveal: elements start lowered + transparent, add .is-in to settle.
+   Ambient float: the hero graph breathes so it never feels frozen. */
+.reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+.reveal.is-in {
+  opacity: 1;
+  transform: none;
+}
+@keyframes hype-float {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(0, -10px); }
+}
+.hype-float {
+  animation: hype-float 9s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .hype-float { animation: none; }
 }
 
 @media (prefers-color-scheme: dark) {
