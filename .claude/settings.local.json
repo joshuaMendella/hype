@@ -46,7 +46,10 @@
       "Bash(bash .claude/skills/subagent-driven-development/scripts/review-package 5d3eb5d 4a052a3)",
       "Bash(git rm *)",
       "Bash(bash .claude/skills/subagent-driven-development/scripts/review-package 606845f 6b2afd3)",
-      "Bash(echo \"EXIT tsc: $?\")"
+      "Bash(echo \"EXIT tsc: $?\")",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3000/)",
+      "Read(//tmp/**)",
+      "Bash(curl -s http://localhost:3000/)"
     ]
   },
   "enableAllProjectMcpServers": true,

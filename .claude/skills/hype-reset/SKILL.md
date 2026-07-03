@@ -1,5 +1,5 @@
 ---
-name: hypereset
+name: hype-reset
 description: Wipe all vault nodes, reset the agenda, and set onboarded=false so the onboarding flow runs again on next chat.
 ---
 

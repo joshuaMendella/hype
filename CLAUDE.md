@@ -45,10 +45,10 @@ The full session-by-session build log lives in **[CHANGELOG.md](CHANGELOG.md)** 
 1. Run `git log --oneline -5` to confirm state
 2. Run `cd apps/web && pnpm dev` to start the dev server
 3. Chat AND extraction both run on **Gemini 2.5 Flash primary** (GEMINI_API_KEY), with **Cerebras gpt-oss-120b as fallback** (CEREBRAS_API_KEY) if Gemini fails/rate-limits. Chat = `app/api/chat/route.ts` (`geminiChat`→`cerebrasChat`), plain text on the interview path. Extraction = `lib/ai/synthesize.ts`, separate structured-output call. Both keys in .env.local; no Anthropic key needed.
-4. To reset everything for testing: `/hypereset` (wipes vault, clears agenda, resets onboarding flag)
+4. To reset everything for testing: `/hype-reset` (wipes vault, clears agenda, resets onboarding flag)
 5. Root "You" node is always at path `_profile.md`, topic `Profile` — extraction depends on this
 6. `.mcp.json` is gitignored — Supabase MCP needs `SUPABASE_ACCESS_TOKEN` set locally in the file (not committed)
-7. **Extraction graph is verified clean-slate (session 13); session 14 added org type + base-profile + wrap/resurface fixes (all live-test pending).** Open items: (a) **live-test session-14's four fixes** — `/hypereset` → open with your job, ~10 turns, mention an unnamed place, hit a lull; confirm org node, `base_profile` age/home saved, no early wrap, placeholder circles back, base question only in the lull; (b) narrow the item→place relation (intent items pick up a stray link to the mall, not just the stores); (c) session-12 #5 persona phrasing (confirm-before-ending, warm sign-off) + the farewell→reload→carryover loop remain live-test pending.
+7. **Extraction graph is verified clean-slate (session 13); session 14 added org type + base-profile + wrap/resurface fixes (all live-test pending).** Open items: (a) **live-test session-14's four fixes** — `/hype-reset` → open with your job, ~10 turns, mention an unnamed place, hit a lull; confirm org node, `base_profile` age/home saved, no early wrap, placeholder circles back, base question only in the lull; (b) narrow the item→place relation (intent items pick up a stray link to the mall, not just the stores); (c) session-12 #5 persona phrasing (confirm-before-ending, warm sign-off) + the farewell→reload→carryover loop remain live-test pending.
 8. **Landing page is built** (session 16) — dark Revolut-style page at `/`, `components/marketing/`, flagship consent-only-ads section. **Immediate focus: visual polish** (user feedback: "good start, room for improvement" — hero legibility with the graph behind the headline, consent-toggle feel, exact "consent-only ads" phrasing), then Vercel deploy. Spec: `docs/superpowers/specs/2026-07-03-landing-page-design.md`.
 
 ## Key extraction rules (updated session 9)
@@ -64,6 +64,7 @@ The full session-by-session build log lives in **[CHANGELOG.md](CHANGELOG.md)** 
 - **No pattern from single instance**: routine requires explicit frequency (unless inferred with flag)
 - Places and people mentioned in passing ARE extracted (become pending agenda threads)
 - Brand nodes: source="system"; item/entity nodes: source="conversation"
+- Place containment (session 17): a `located_in` link_type nests places geographically (venue→city→country). Emitted smaller→larger ("Grand Club in Rzeszów"); unlike brand/relation it nests **source under target**. Extractor maps containment labels (in/located in/inside/within/part of) to `located_in`; the `in` relation may target an already-tracked home city/country even when not a fresh entity that window.
 
 ## Key interviewer rules (updated session 9)
 - Agenda injected every turn: current entity + pending threads; AI follows user pivots naturally for 2–3 turns then re-anchors ("By the way, back to that [entity]…") — no longer blocks topic changes

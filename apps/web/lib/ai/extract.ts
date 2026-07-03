@@ -404,11 +404,14 @@ export async function extractFacts(
       const key = `${resolved.source}->${resolved.target}`
       if (seen.has(key)) continue
       seen.add(key)
+      // Containment ("Grand Club in Rzeszow", "Rzeszow in Poland") is emitted contained→container,
+      // i.e. source is the SMALLER place. Tag it located_in so the graph nests source under target.
+      const isContainment = ["in", "located in", "inside", "within", "part of"].includes(rel.label.toLowerCase().trim())
       edges.push({
         user_id: userId,
         source_note_id: resolved.source,
         target_note_id: resolved.target,
-        link_type: "relation" as const,
+        link_type: isContainment ? ("located_in" as const) : ("relation" as const),
         anchor_text: rel.label.slice(0, 40),
       })
     }

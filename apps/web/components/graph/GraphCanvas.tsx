@@ -88,8 +88,10 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
     if (profile) {
       const targetId = (l: GraphLink) => (typeof l.target === "string" ? l.target : (l.target as GraphNode).id)
       const sourceId = (l: GraphLink) => (typeof l.source === "string" ? l.source : (l.source as GraphNode).id)
-      const structuralLinks = links.filter((l) => l.link_type === "brand" || l.link_type === "relation")
-      const children = new Set(structuralLinks.map(targetId))
+      const structuralLinks = links.filter((l) => l.link_type === "brand" || l.link_type === "relation" || l.link_type === "located_in")
+      // located_in points contained→container, so its SOURCE is the child (opposite of brand/relation).
+      const childId = (l: GraphLink) => (l.link_type === "located_in" ? sourceId(l) : targetId(l))
+      const children = new Set(structuralLinks.map(childId))
 
       // You links to every ROOT (no incoming brand/relation edge); children nest under their parent.
       // But a pure cycle (e.g. event--"at"-->place + place--"hosts"-->event) has NO root, so the
@@ -165,9 +167,10 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
     // Links — a knowledge graph's appeal IS its connectedness, so keep edges readable.
     // self (You→root): soft white spine; brand: purple; relation (entity→entity): stronger neutral.
     const linkStyle: Record<string, { stroke: string; width: number }> = {
-      self:     { stroke: "#ffffff33", width: 1.25 },
-      brand:    { stroke: "#a78bfa45", width: 1.25 },
-      relation: { stroke: "#ffffff4d", width: 1.25 },
+      self:       { stroke: "#ffffff33", width: 1.25 },
+      brand:      { stroke: "#a78bfa45", width: 1.25 },
+      relation:   { stroke: "#ffffff4d", width: 1.25 },
+      located_in: { stroke: "#67e8f955", width: 1.25 },
     }
     const link = g.append("g")
       .selectAll("line")
@@ -178,7 +181,7 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
 
     // Relationship edges carry a label ("at", "with", …) — surface it on hover via a native
     // <title> child. (Node tooltips are the rich HTML ones; edges just get the plain label.)
-    link.filter((d) => d.link_type === "relation" && !!d.anchor_text)
+    link.filter((d) => (d.link_type === "relation" || d.link_type === "located_in") && !!d.anchor_text)
       .append("title")
       .text((d) => d.anchor_text ?? "")
 

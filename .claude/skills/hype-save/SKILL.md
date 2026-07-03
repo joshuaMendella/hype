@@ -1,5 +1,5 @@
 ---
-name: hypesave
+name: hype-save
 description: Commit and push all session changes to GitHub, then update CLAUDE.md with the current session state.
 ---
 

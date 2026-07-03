@@ -178,7 +178,8 @@ For each entity, connect it to OTHER entities in this window that it genuinely r
 - a person who lives in a place ("lives in")
 - a store/brand the user shops at, browses, or will check WHILE AT a place → relate that brand to the place ("at"). Only the place they are actually at, not one mentioned as elsewhere.
 - an item the user is shopping for and the store(s) they'll look for it in → relate the item to each of those stores ("shop at")
-Reuse the exact title of an entity you are also returning in this window — never invent a target that isn't one of the entities. Emit an empty array when nothing genuinely connects. Do not relate an entity to itself.
+- a place inside a larger place — a venue/mall/club in its city, a city in its country ("in"), emitted smaller→larger. A place the user visits locally (no other city named) is in their home city: relate it to the home-city place with "in".
+Reuse the exact title of an entity you are also returning in this window — never invent a target that isn't one of the entities. EXCEPTION: for the "in" containment relation you MAY target a place from the "Already tracked or in the graph" list (e.g. the home city or its country) even if it isn't a fresh entity this window. Emit an empty array when nothing genuinely connects. Do not relate an entity to itself.
 
 Return only the structured JSON. Extract nothing if the slice contains no durable facts.`
 
