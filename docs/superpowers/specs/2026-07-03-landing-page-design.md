@@ -26,18 +26,27 @@ reader feels ("Never lose a recommendation again"), and the visual/body undernea
 feature that delivers it. Features alone don't convert — the reader has to see their own life
 getting easier. Warm, plain-spoken, second-person ("you"), never fintech-cold.
 
+## The category claim (the big deal — say it loud, say it early)
+
+**Hype is the first hyper-tailored personal assistant with consent-only ads.** This is the
+positioning, not a feature buried at the bottom. Because the assistant genuinely knows you, its
+offers are the most relevant you'll ever see — and because it's consent-only, you asked for every
+single one. That's the inversion of surveillance advertising, and nobody else is doing it. It gets
+stated in the **hero** (a claim badge) and expanded in **§2** (promoted up front, right after the
+hero) — before the deeper feature tour.
+
 ## The value stories (and where each lives)
 
-1. **The living graph** (the magic) → the **hero**. Most distinctive, screenshot-worthy thing.
+1. **The living graph** (the magic) → the **hero**, carrying the category claim badge.
    Outcome: *a place that remembers your whole world so you don't have to.*
-2. **Just talk** → §2. Outcome: *offload the mental clutter — no forms, no filing.*
-3. **Second brain** (research your past, track progress) → §3. Outcome: *never lose a
+2. **Awareness & consent — the consent-only ads breakthrough** → §2 (promoted up front). The
+   category-defining differentiator: hyper-relevant *because* it knows you, consent-only *so* it's
+   never creepy. Outcome: *the most relevant offers you'll ever see — and you asked for every one.*
+3. **Just talk** → §3. Outcome: *offload the mental clutter — no forms, no filing.*
+4. **Second brain** (research your past, track progress) → §4. Outcome: *never lose a
    recommendation, a plan, or a memory again.*
-4. **Proactive assistant** (notifications) → §4. Outcome: *it reaches out to you — a quick chat to
+5. **Proactive assistant** (notifications) → §5. Outcome: *it reaches out to you — a quick chat to
    stay current, and a heads-up when something you actually want is worth knowing about.*
-5. **Awareness & consent** (the honest data deal) → §5. Proud, prominent trust section — reframed
-   from "control your ads" to "you see everything it knows; nothing happens without your yes."
-   Outcome: *peace of mind — you're in control.*
 6. **Take it everywhere** (download / daily companion) → §6. Outcome: *your assistant, in your
    pocket, every day.*
 
@@ -48,10 +57,10 @@ getting easier. Warm, plain-spoken, second-person ("you"), never fintech-cold.
   section gets a topic-derived accent gradient, so the landing page is literally colored by the
   same system that colors the graph. This is the one distinctive, product-grounded aesthetic thread.
   - Hero / CTA band: white glow (`#ffffff` — the Profile "You" color)
-  - §2 "Just talk": topic blue (`#60a5fa`, Work)
-  - §3 "Second brain": topic green (`#4ade80`, Health)
-  - §4 "Proactive assistant": topic cyan (`#22d3ee`, Location)
-  - §5 "Awareness & consent": topic amber (`#fbbf24`, Home)
+  - §2 "Awareness & consent" (promoted): topic amber (`#fbbf24`, Home) — the standout differentiator
+  - §3 "Just talk": topic blue (`#60a5fa`, Work)
+  - §4 "Second brain": topic green (`#4ade80`, Health)
+  - §5 "Proactive assistant": topic cyan (`#22d3ee`, Location)
   - §6 "Take it everywhere": topic purple (`#a855f7`, Creativity)
 - **Typography:** `next/font/google`, self-hosted at build (no runtime CDN — matches security posture).
   - Display / headlines: **Space Grotesk** (tight, engineered). Swappable — Archivo / Bricolage
@@ -62,7 +71,7 @@ getting easier. Warm, plain-spoken, second-person ("you"), never fintech-cold.
 - **Motion (restrained):**
   - Hero graph animates on load (nodes drift/settle/glow).
   - Each section rises + fades in on scroll (IntersectionObserver, one-shot).
-  - Node "birth" pulse in the hero and §2 demo.
+  - Node "birth" pulse in the hero and the §3 "just talk" demo.
   - No parallax zoo, no scattered effects — one orchestrated moment per section.
 - **Accessibility:** respect `prefers-reduced-motion` (freeze the graph to a static settled state,
   disable scroll-reveal). Real focus rings on nav + CTAs. Semantic headings.
@@ -75,12 +84,15 @@ getting easier. Warm, plain-spoken, second-person ("you"), never fintech-cold.
 - Transparent over hero; gains a faint `bg-black/60` blur after slight scroll.
 
 ### 1 — Hero
+- **Category-claim badge** (above the eyebrow, pill-shaped, subtle glow): **"The first personal
+  assistant with consent-only ads."** This is the first thing the visitor reads — stakes the
+  positioning immediately. Clicking it scrolls to §2.
 - Eyebrow: `YOUR PERSONAL AI ASSISTANT` (uppercase, tracked, dim).
 - Headline (display): **"An assistant that learns you by heart."**
   - Alt copy to A/B later: "Meet the assistant that actually knows you." / "Your mind, mapped."
 - Subcopy (body, one line): "Talk to Hype like a friend. It builds a living map of your world —
   the people, places, and things that make you *you* — and remembers all of it."
-- CTAs: **`Start your graph`** (primary) · `See how it works` (ghost, scrolls to §2).
+- CTAs: **`Start your graph`** (primary) · `See how it works` (ghost, scrolls to §3).
 - **Visual — the live graph (the signature moment):** reuse the real `GraphCanvas` rendering an
   **ambient demo graph** (~12–18 hard-coded demo nodes/links, seeded, no Supabase). Nodes drift
   via the existing force sim, glow, and grow in on load. This IS the product on the landing page.
@@ -91,7 +103,29 @@ getting easier. Warm, plain-spoken, second-person ("you"), never fintech-cold.
     → render one settled frame, no loop.
 - Radial vignette (`radial-gradient(...transparent…#0a0a0a)`) fades graph edges into the page.
 
-### 2 — "Stop keeping it all in your head." (feature: just talk)
+### 2 — "The first assistant with consent-only ads." (the breakthrough — promoted up front)
+- **This is the flagship section.** Give it the most visual weight after the hero: full-bleed,
+  strongest headline treatment, its own standout moment. It's the reason Hype is different.
+- Outcome headline states the category claim outright. Sub-headline: *"The most relevant offers
+  you'll ever see — and you asked for every one."*
+- The argument, in three beats:
+  1. **Hyper-tailored** — because the assistant genuinely knows you (your graph), its offers are
+     relevant in a way generic ad-tech can't touch. No creepy guesswork; it just knows.
+  2. **Consent-only** — nothing is ever pushed. Hype asks first, every time; you say yes or no.
+     Only the categories you opt into, only when you want them. The inversion of surveillance ads.
+  3. **You see everything** — it's your graph, in the open. No hidden profile, no tracking around
+     the web. That transparency is *why it's free*, stated plainly.
+- Visual: the **consent panel mock** as the star — a toggle row ("Show me relevant offers for:
+  Style ✓ / Travel ✓ / Finance ✗") beside a "Here's exactly what I know about you" open panel;
+  a single offer card slides in *only after* a toggle flips on (demonstrates "you asked for it").
+- Body: "Every other app watches you to sell ads. Hype flips it: because it actually knows you —
+  with your permission — the few offers it surfaces are ones you'd genuinely want, and it never
+  shows a single one you didn't say yes to. You see everything it knows, you choose what it can act
+  on, and you can switch any of it off. That's why it's free, and that's the whole deal — no hidden
+  tracking, no ads chasing you around the internet. Nobody else does this."
+- Accent: topic amber (the standout color).
+
+### 3 — "Stop keeping it all in your head." (feature: just talk)
 - Outcome headline: the reader offloads mental clutter. Feature underneath: no forms — you have a
   conversation and the graph builds itself.
 - Visual: a **split scene** — an assistant chat bubble asking a question on one side; on the other,
@@ -102,7 +136,7 @@ getting easier. Warm, plain-spoken, second-person ("you"), never fintech-cold.
   a map you can actually see."
 - Accent: topic blue.
 
-### 3 — "Never lose a recommendation again." (feature: second brain / research + progress)
+### 4 — "Never lose a recommendation again." (feature: second brain / research + progress)
 - Outcome headline: nothing you've been told or figured out ever slips away. Feature: revisit old
   nodes, follow how threads connect, watch the graph grow over weeks.
 - Visual: a **timeline scrubber** / "then → now" — the same demo graph shown small (week 1) growing
@@ -112,33 +146,19 @@ getting easier. Warm, plain-spoken, second-person ("you"), never fintech-cold.
   connections form, and watch yourself grow, one node at a time."
 - Accent: topic green.
 
-### 4 — "It remembers, so it can remind you." (feature: proactive notifications)
+### 5 — "It remembers, so it can remind you." (feature: proactive notifications)
 - Outcome headline: the assistant does the remembering *and* the reaching-out — the reader never has
   to remember to keep it updated or to go hunting for a deal. Two notification types:
   1. **A nudge to chat** — "Got two minutes? Tell me about your weekend." Keeps the graph current
      without the reader ever having to open the app on their own.
   2. **A heads-up when something you want is worth knowing about** — only for things you've said you
-     want, and only categories you've consented to (forward-links to §5). Never spam.
+     want, and only categories you've consented to (ties back to §2). Never spam.
 - Visual: a **phone lock-screen mock** with two stacked Hype notifications (a chat nudge + a consent-
   gated offer alert), gently animating in.
 - Body: "Life moves fast and you'll forget to check in — so Hype checks in with you. A quick,
   friendly nudge to catch up keeps your world current, and when something you actually told it you
   wanted is worth a look, it lets you know. You decide what's worth a ping; it never nags."
 - Accent: topic cyan.
-
-### 5 — "Total awareness. Total consent." (trust pillar — prominent)
-- The honest deal, stated with pride, not fine print. Outcome: peace of mind — the reader is in
-  control of their own data and what gets acted on.
-  - You can **see everything** Hype knows about you (it's your graph, in the open).
-  - **Nothing leaves without your yes.** When something you actually want has a relevant offer,
-    Hype asks first. You say yes or no. Never forced, never tracked around the web.
-  - That consent is *why it's free* — stated plainly.
-- Visual: a clean **consent panel mock** — a toggle row ("Show me relevant offers for: Style ✓ /
-  Travel ✓ / Finance ✗") and a "Here's what I know about you" open-book panel.
-- Body: "Hype is free because, with your explicit yes, it can surface offers you'd actually want.
-  You see everything it knows, you choose what it can act on, and you can turn any of it off. That's
-  the whole deal — no hidden tracking, no ads chasing you around the internet."
-- Accent: topic amber.
 
 ### 6 — "Your assistant, in your pocket." (feature: download the app)
 - Outcome headline: it's an everyday companion that goes where the reader goes. Feature: native
@@ -176,10 +196,10 @@ apps/web/
     ├── HeroGraph.tsx                    ← ambient demo graph (wraps GraphCanvas + demo data)
     ├── Nav.tsx                          ← sticky blurred nav
     ├── Section.tsx                      ← shared scroll-reveal wrapper (IntersectionObserver) + accent
-    ├── TalkDemo.tsx                     ← §2 chat-bubble → node-birth split scene
-    ├── GrowthTimeline.tsx               ← §3 then→now scrubber
-    ├── NotifyPreview.tsx                ← §4 phone lock-screen with two Hype notifications
-    ├── ConsentPanel.tsx                 ← §5 consent toggle + "what I know" mock
+    ├── ConsentPanel.tsx                 ← §2 (flagship) consent toggle + "what I know" + offer-on-consent
+    ├── TalkDemo.tsx                     ← §3 chat-bubble → node-birth split scene
+    ├── GrowthTimeline.tsx               ← §4 then→now scrubber
+    ├── NotifyPreview.tsx                ← §5 phone lock-screen with two Hype notifications
     ├── AppDownload.tsx                  ← §6 device mock + "coming soon" iOS/Android badges
     └── demoGraph.ts                     ← seeded demo nodes/links (no DB)
 ```
@@ -204,8 +224,9 @@ Fonts: add Space Grotesk + Inter in `app/layout.tsx` via `next/font/google` as C
 ## Success criteria
 - Logged-out `/` renders the cinematic page; logged-in `/` still redirects to `/graph`.
 - Hero graph animates on load and reads as "live product," settles without pinning CPU.
-- All six value stories present, hero = living graph, consent a proud section, every section
-  headline leads with a life outcome (not a bare feature name).
+- All six value stories present, hero = living graph, **consent-only ads promoted to §2 as the
+  flagship differentiator** (claim also badged in the hero), every section headline leads with a
+  life outcome (not a bare feature name).
 - §6 sets the "download & use daily" expectation honestly (coming-soon, web CTA works today).
 - §4 communicates proactive notifications (chat nudge + consent-gated offer alert).
 - `pnpm build` clean; `prefers-reduced-motion` respected; responsive (mobile → single column,
