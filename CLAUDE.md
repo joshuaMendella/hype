@@ -49,7 +49,7 @@ The full session-by-session build log lives in **[CHANGELOG.md](CHANGELOG.md)** 
 5. Root "You" node is always at path `_profile.md`, topic `Profile` — extraction depends on this
 6. `.mcp.json` is gitignored — Supabase MCP needs `SUPABASE_ACCESS_TOKEN` set locally in the file (not committed)
 7. **Extraction graph is verified clean-slate (session 13); session 14 added org type + base-profile + wrap/resurface fixes (all live-test pending).** Open items: (a) **live-test session-14's four fixes** — `/hypereset` → open with your job, ~10 turns, mention an unnamed place, hit a lull; confirm org node, `base_profile` age/home saved, no early wrap, placeholder circles back, base question only in the lull; (b) narrow the item→place relation (intent items pick up a stray link to the mall, not just the stores); (c) session-12 #5 persona phrasing (confirm-before-ending, warm sign-off) + the farewell→reload→carryover loop remain live-test pending.
-8. **Immediate focus: landing page at /** ("Be in control of your ads" + "Build your personal graph"), then Vercel deploy
+8. **Landing page is built** (session 16) — dark Revolut-style page at `/`, `components/marketing/`, flagship consent-only-ads section. **Immediate focus: visual polish** (user feedback: "good start, room for improvement" — hero legibility with the graph behind the headline, consent-toggle feel, exact "consent-only ads" phrasing), then Vercel deploy. Spec: `docs/superpowers/specs/2026-07-03-landing-page-design.md`.
 
 ## Key extraction rules (updated session 9)
 - Entity-centric graph: entity-type hub → Brand hub → Item (vault paths: `item/zara/belt.md`, `place/monmouth-coffee.md`)
@@ -84,7 +84,7 @@ The full session-by-session build log lives in **[CHANGELOG.md](CHANGELOG.md)** 
 - Intent fields: intent_confidence (0–1) and intent_utterance stored alongside intent flag
 
 ## What's NOT done yet (next steps in order)
-1. Landing page — marketing page at / (currently redirects to /signup); lead with "Be in control of your ads" + "Build your personal graph"
+1. Landing page **polish** — page is built (session 16, `components/marketing/`); needs a visual pass (hero legibility, consent-toggle feel, copy) per user feedback
 2. Vercel deployment
 3. Affiliate link integration — Amazon Associates, Ticketmaster, Booking.com (Day 1 ad revenue, no advertiser deals needed)
 4. Ad moment UI — sponsored offer card inside ChatPanel, clearly labeled, triggered only after user says yes
@@ -122,6 +122,7 @@ ANTHROPIC_API_KEY=...     ← optional; only if extraction (lib/ai/synthesize.ts
 ```
 apps/web/
 ├── app/
+│   ├── page.tsx                    ← landing page (renders Landing; logged-in → /graph)
 │   ├── (auth)/login/page.tsx
 │   ├── (auth)/signup/page.tsx
 │   ├── (app)/graph/page.tsx        ← home screen (server component, passes data to GraphWrapper)
@@ -131,6 +132,7 @@ apps/web/
 │   ├── graph/
 │   │   ├── GraphCanvas.tsx         ← D3 graph (refreshTrigger prop, no polling)
 │   │   └── GraphWrapper.tsx        ← client wrapper: shares refreshTrigger between canvas + chat
+│   ├── marketing/                  ← landing page (Landing, DemoGraph, ConsentPanel, TalkDemo, GrowthTimeline, Nav, Reveal, graphData)
 │   └── chat/ChatPanel.tsx          ← AI chat overlay (onReply callback)
 ├── lib/
 │   ├── supabase/client.ts          ← browser client
