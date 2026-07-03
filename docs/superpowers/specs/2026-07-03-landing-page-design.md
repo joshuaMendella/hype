@@ -16,12 +16,30 @@ fintech-speak). Seamless into the app's dark graph screen (`#0d0d0d`).
 
 Logged-in users still bypass this page (redirect to `/graph`). Logged-out users see the page.
 
-## The three value stories (and where each lives)
+Hype is a **daily-use app you download** (iOS/Android planned; web works today). The page should
+make it feel like an everyday companion, not a one-time novelty.
+
+## Voice & copy principle (applies to every section)
+
+**Lead with the life outcome; the feature is the mechanism.** Every headline is a benefit the
+reader feels ("Never lose a recommendation again"), and the visual/body underneath shows the
+feature that delivers it. Features alone don't convert — the reader has to see their own life
+getting easier. Warm, plain-spoken, second-person ("you"), never fintech-cold.
+
+## The value stories (and where each lives)
 
 1. **The living graph** (the magic) → the **hero**. Most distinctive, screenshot-worthy thing.
-2. **Second brain** (research your past, track progress) → a dedicated section. The retention story.
-3. **Awareness & consent** (the honest data deal) → a proud, prominent trust section — reframed
+   Outcome: *a place that remembers your whole world so you don't have to.*
+2. **Just talk** → §2. Outcome: *offload the mental clutter — no forms, no filing.*
+3. **Second brain** (research your past, track progress) → §3. Outcome: *never lose a
+   recommendation, a plan, or a memory again.*
+4. **Proactive assistant** (notifications) → §4. Outcome: *it reaches out to you — a quick chat to
+   stay current, and a heads-up when something you actually want is worth knowing about.*
+5. **Awareness & consent** (the honest data deal) → §5. Proud, prominent trust section — reframed
    from "control your ads" to "you see everything it knows; nothing happens without your yes."
+   Outcome: *peace of mind — you're in control.*
+6. **Take it everywhere** (download / daily companion) → §6. Outcome: *your assistant, in your
+   pocket, every day.*
 
 ## Visual system
 
@@ -32,7 +50,9 @@ Logged-in users still bypass this page (redirect to `/graph`). Logged-out users 
   - Hero / CTA band: white glow (`#ffffff` — the Profile "You" color)
   - §2 "Just talk": topic blue (`#60a5fa`, Work)
   - §3 "Second brain": topic green (`#4ade80`, Health)
-  - §4 "Awareness & consent": topic amber (`#fbbf24`, Home)
+  - §4 "Proactive assistant": topic cyan (`#22d3ee`, Location)
+  - §5 "Awareness & consent": topic amber (`#fbbf24`, Home)
+  - §6 "Take it everywhere": topic purple (`#a855f7`, Creativity)
 - **Typography:** `next/font/google`, self-hosted at build (no runtime CDN — matches security posture).
   - Display / headlines: **Space Grotesk** (tight, engineered). Swappable — Archivo / Bricolage
     Grotesque are fallbacks if a different grotesk is preferred.
@@ -71,26 +91,44 @@ Logged-in users still bypass this page (redirect to `/graph`). Logged-out users 
     → render one settled frame, no loop.
 - Radial vignette (`radial-gradient(...transparent…#0a0a0a)`) fades graph edges into the page.
 
-### 2 — "Just talk. It does the rest."
-- One idea: no forms — you have a conversation, and the graph builds itself.
+### 2 — "Stop keeping it all in your head." (feature: just talk)
+- Outcome headline: the reader offloads mental clutter. Feature underneath: no forms — you have a
+  conversation and the graph builds itself.
 - Visual: a **split scene** — an assistant chat bubble asking a question on one side; on the other,
   a node materializes + links in (scroll-triggered birth animation). Reuses the node-birth visual
   language from GraphCanvas.
-- Body: "No setup, no forms, no tags to manage. You chat; Hype listens and quietly turns what you
-  say into a connected map you can actually see."
+- Body: "The people, plans, and things you're trying to remember don't belong in your head. Just
+  talk to Hype like a friend — no setup, no forms, no tags — and it quietly turns what you say into
+  a map you can actually see."
 - Accent: topic blue.
 
-### 3 — "Your memory, searchable."
-- One idea: the second brain — revisit old nodes, follow how threads connect, watch the graph grow
-  over weeks. Research your past; track your progress.
+### 3 — "Never lose a recommendation again." (feature: second brain / research + progress)
+- Outcome headline: nothing you've been told or figured out ever slips away. Feature: revisit old
+  nodes, follow how threads connect, watch the graph grow over weeks.
 - Visual: a **timeline scrubber** / "then → now" — the same demo graph shown small (week 1) growing
   to large (week 8) as the user scrubs or on scroll.
-- Body: "Every conversation adds to your graph. Come back and explore what you told it months ago,
-  see new connections form, and watch yourself grow — one node at a time."
+- Body: "That restaurant a friend swore by, the gift idea you had in March, the book you meant to
+  read — it's all still here, searchable. Come back anytime to explore what you told it, see new
+  connections form, and watch yourself grow, one node at a time."
 - Accent: topic green.
 
-### 4 — "Total awareness. Total consent." (trust pillar — prominent)
-- The honest deal, stated with pride, not fine print:
+### 4 — "It remembers, so it can remind you." (feature: proactive notifications)
+- Outcome headline: the assistant does the remembering *and* the reaching-out — the reader never has
+  to remember to keep it updated or to go hunting for a deal. Two notification types:
+  1. **A nudge to chat** — "Got two minutes? Tell me about your weekend." Keeps the graph current
+     without the reader ever having to open the app on their own.
+  2. **A heads-up when something you want is worth knowing about** — only for things you've said you
+     want, and only categories you've consented to (forward-links to §5). Never spam.
+- Visual: a **phone lock-screen mock** with two stacked Hype notifications (a chat nudge + a consent-
+  gated offer alert), gently animating in.
+- Body: "Life moves fast and you'll forget to check in — so Hype checks in with you. A quick,
+  friendly nudge to catch up keeps your world current, and when something you actually told it you
+  wanted is worth a look, it lets you know. You decide what's worth a ping; it never nags."
+- Accent: topic cyan.
+
+### 5 — "Total awareness. Total consent." (trust pillar — prominent)
+- The honest deal, stated with pride, not fine print. Outcome: peace of mind — the reader is in
+  control of their own data and what gets acted on.
   - You can **see everything** Hype knows about you (it's your graph, in the open).
   - **Nothing leaves without your yes.** When something you actually want has a relevant offer,
     Hype asks first. You say yes or no. Never forced, never tracked around the web.
@@ -102,7 +140,23 @@ Logged-in users still bypass this page (redirect to `/graph`). Logged-out users 
   the whole deal — no hidden tracking, no ads chasing you around the internet."
 - Accent: topic amber.
 
-### 5 — Closing CTA band
+### 6 — "Your assistant, in your pocket." (feature: download the app)
+- Outcome headline: it's an everyday companion that goes where the reader goes. Feature: native
+  iOS + Android apps for daily use.
+- **Honesty constraint:** the mobile app is not built yet. Ship this section as **"Coming soon to
+  iOS & Android."** The real, works-today CTA is the web app (`Start your graph` → `/signup`). Do
+  NOT render live App Store / Google Play badges until the app exists (they'd 404 and break the
+  trust the page is selling). Use "coming soon" badge treatments (disabled/labelled).
+- Visual: a **phone in-hand / device mock** showing the graph home screen, with "Coming soon to iOS
+  & Android" badges beneath.
+- Body: "Hype is built to live in your pocket — a two-minute chat on the bus, a glance at your
+  graph over coffee. The iOS and Android apps are on the way. Start on the web today and your graph
+  comes with you when they land."
+- Optional (decide at build, see open questions): a **notify-me email field** ("Be first to know
+  when the app drops"). Default = omit (YAGNI: no capture backend yet).
+- Accent: topic purple.
+
+### 7 — Closing CTA band
 - Full-width, glowing. Headline (display): **"Start building your graph."**
 - Subcopy: "Free to use. Yours to control."
 - One primary CTA → `/signup`. Ambient graph glow behind.
@@ -124,7 +178,9 @@ apps/web/
     ├── Section.tsx                      ← shared scroll-reveal wrapper (IntersectionObserver) + accent
     ├── TalkDemo.tsx                     ← §2 chat-bubble → node-birth split scene
     ├── GrowthTimeline.tsx               ← §3 then→now scrubber
-    ├── ConsentPanel.tsx                 ← §4 consent toggle + "what I know" mock
+    ├── NotifyPreview.tsx                ← §4 phone lock-screen with two Hype notifications
+    ├── ConsentPanel.tsx                 ← §5 consent toggle + "what I know" mock
+    ├── AppDownload.tsx                  ← §6 device mock + "coming soon" iOS/Android badges
     └── demoGraph.ts                     ← seeded demo nodes/links (no DB)
 ```
 
@@ -141,12 +197,17 @@ Fonts: add Space Grotesk + Inter in `app/layout.tsx` via `next/font/google` as C
 - Pricing page, blog, docs, about — single marketing page only.
 - Working Privacy/Terms pages (link placeholders for now).
 - Analytics/tracking scripts (add at deploy time if wanted).
-- Mobile app store badges (app not built).
+- **Live** App Store / Google Play badges — app not built; §6 ships "coming soon" only.
+- Real push-notification delivery — §4 shows the *promise* via a mock; the feature is app-side, later.
+- Notify-me email capture backend (no store yet; email field is optional and omitted by default).
 
 ## Success criteria
 - Logged-out `/` renders the cinematic page; logged-in `/` still redirects to `/graph`.
 - Hero graph animates on load and reads as "live product," settles without pinning CPU.
-- All four value stories present, with the hero = living graph and consent as a proud section.
+- All six value stories present, hero = living graph, consent a proud section, every section
+  headline leads with a life outcome (not a bare feature name).
+- §6 sets the "download & use daily" expectation honestly (coming-soon, web CTA works today).
+- §4 communicates proactive notifications (chat nudge + consent-gated offer alert).
 - `pnpm build` clean; `prefers-reduced-motion` respected; responsive (mobile → single column,
   graph scales/simplifies).
 - Visually cohesive with the dark app; accent colors sourced from the real topic palette.
@@ -155,3 +216,4 @@ Fonts: add Space Grotesk + Inter in `app/layout.tsx` via `next/font/google` as C
 - Exact hero headline (3 candidates above — pick during build, easy to swap).
 - §3 interaction: scroll-driven vs a draggable scrubber (start with scroll-driven; simpler).
 - Whether the hero demo graph shows tooltips on hover (default: off for calm).
+- §6 notify-me email field: include or omit (default omit until there's a capture backend).
