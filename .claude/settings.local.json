@@ -45,7 +45,8 @@
       "Bash(bash .claude/skills/subagent-driven-development/scripts/task-brief docs/superpowers/plans/2026-07-02-entity-resolution.md 5)",
       "Bash(bash .claude/skills/subagent-driven-development/scripts/review-package 5d3eb5d 4a052a3)",
       "Bash(git rm *)",
-      "Bash(bash .claude/skills/subagent-driven-development/scripts/review-package 606845f 6b2afd3)"
+      "Bash(bash .claude/skills/subagent-driven-development/scripts/review-package 606845f 6b2afd3)",
+      "Bash(echo \"EXIT tsc: $?\")"
     ]
   },
   "enableAllProjectMcpServers": true,

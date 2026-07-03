@@ -40,7 +40,7 @@ export type RawEntity = {
   title: string
   topic: string
   brand: string | null
-  entity_type: "item" | "brand" | "place" | "event" | "person" | "org"
+  entity_type: "item" | "brand" | "place" | "event" | "person" | "org" | "interest"
   tags: string[]
   intent: boolean
   intent_confidence?: number

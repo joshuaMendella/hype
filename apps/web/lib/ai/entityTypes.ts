@@ -1,4 +1,4 @@
-export const ENTITY_TYPES = ["item", "brand", "place", "person", "event", "org"] as const
+export const ENTITY_TYPES = ["item", "brand", "place", "person", "event", "org", "interest"] as const
 export type EntityType = (typeof ENTITY_TYPES)[number]
 
 export const TIER_PARAMS: Record<EntityType, { tier1: string[]; tier2: string[]; tier3: string[] }> = {
@@ -9,6 +9,8 @@ export const TIER_PARAMS: Record<EntityType, { tier1: string[]; tier2: string[];
   brand:  { tier1: ["Category"],             tier2: ["Sentiment"], tier3: ["Specific Products"] },
   // org: an organization the user belongs to — employer, school, team, club. Name = its name, Role = what they do there.
   org:    { tier1: ["Name", "Role"],         tier2: ["Category", "Field", "How Long"], tier3: ["Team Size", "Sentiment"] },
+  // interest: a subject/hobby/field the user follows. Complete on naming (tier1 empty) — no drill-down, writes to the graph immediately, can grow sub-nodes later.
+  interest: { tier1: [],                     tier2: ["Focus", "Why"], tier3: ["Resources", "How Long"] },
 }
 
 export function getTier1Missing(entityType: EntityType, content_md: string): string[] {
@@ -29,5 +31,6 @@ if (process.argv[1] && process.argv[1].endsWith("entityTypes.ts")) {
   assert(getTier1Missing("place", "- **Frequency**: weekly").length === 1, "unnamed place is incomplete")
   assert(getTier1Missing("org", "- **Name**: Acme\n- **Role**: engineer").length === 0, "org completes on Name+Role")
   assert(getTier1Missing("org", "- **Name**: Acme").length === 1, "org without Role is incomplete")
+  assert(getTier1Missing("interest", "").length === 0, "interest completes on naming alone (no tier-1 attrs)")
   console.log("entityTypes.ts self-check OK")
 }

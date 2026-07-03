@@ -34,7 +34,7 @@ export interface Intent {
   expires_at: string | null
 }
 
-export type EntityType = "item" | "brand" | "place" | "person" | "event"
+export type EntityType = "item" | "brand" | "place" | "person" | "event" | "org" | "interest"
 
 export interface VaultNote {
   id: string
