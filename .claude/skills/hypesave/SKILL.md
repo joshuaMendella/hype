@@ -16,11 +16,15 @@ git status
 git diff HEAD
 ```
 
-### 2. Update CLAUDE.md
-Based on what was built or fixed this session, update the relevant sections of CLAUDE.md:
-- Add completed items to "What's been built" (with today's date updated in the header line)
-- Remove items from "What's NOT done yet" if they're now done
-- Update the date in the header `## What's been built (as of YYYY-MM-DD, updated session N)` — increment the session number
+### 2. Update the docs
+The session-by-session build log lives in **CHANGELOG.md**, not CLAUDE.md. CLAUDE.md holds only
+evergreen context, rules, and current focus. So:
+- **CHANGELOG.md** — append this session's work as a new `- [x] **Session N — …**` entry at the
+  bottom, matching the existing style. Bump the `## What's been built (as of YYYY-MM-DD, updated
+  session N)` header line (date + session number).
+- **CLAUDE.md** — only touch it if evergreen facts changed: update "Key extraction/interviewer
+  rules", "File structure", the "START OF NEXT SESSION checklist", or remove finished items from
+  "What's NOT done yet". Do NOT paste the session narrative here — that's what CHANGELOG.md is for.
 
 ### 3. Stage files
 Stage all modified tracked files. Never stage:
