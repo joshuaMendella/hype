@@ -155,6 +155,9 @@ ALTER TABLE public.vault_links ADD COLUMN IF NOT EXISTS link_type TEXT DEFAULT '
 -- Phase 4 — advertiser data layer
 -- Per-category ad consent: { "fashion": true, "electronics": false, ... }
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS ad_preferences JSONB DEFAULT '{}'::jsonb;
+-- Ground-layer demographics for ad targeting: { "age": 28, "home_location": "Rzeszow" }.
+-- Occupation lives as an `org` vault_note, not here. Filled gradually via lull nudges.
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS base_profile JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 -- Intent lifecycle: expressed wants ("I need new running shoes") become tracked,
 -- consent-gated, expiring referral opportunities. CPA/affiliate revenue lives here.

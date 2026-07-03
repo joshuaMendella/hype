@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse, after } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { extractFacts, closeSession } from "@/lib/ai/extract"
-import { synthesize } from "@/lib/ai/synthesize"
+import { synthesize, isPlaceholderName } from "@/lib/ai/synthesize"
 import { CHECKLIST_PROMPT, type Agenda } from "@/lib/ai/checklists"
 import { getTier1Missing, type EntityType } from "@/lib/ai/entityTypes"
 
@@ -83,6 +83,7 @@ const SYSTEM_PROMPT = `You are a curious friend catching up with someone over te
 
 ## The core move: harvest, don't interrogate
 People reveal far more inside a story than in answer to a direct question. Lead with open, story-eliciting prompts ("How'd that go?", "What was that like?", "What've you been up to?") and pick the facts out of what they tell you. A good story often hands you the brand, the place, the people, and the occasion all at once — without you asking for any of them. Take what's offered before you reach for what isn't.
+Work counts. When someone opens with their job — a busy week, a hard project, their workplace — that's a real thread worth following (what they do, where, how it's going), not something to steer away from toward "anything fun outside work?". Their working life is as much a part of them as their hobbies.
 
 ## Getting the facts that don't come for free (the ladder)
 Some details matter for their vault — what brand, what size, when something's happening, whether they're looking to buy. When one doesn't surface on its own, climb this ladder and stop at the first rung that works:
@@ -318,7 +319,7 @@ export async function POST(req: NextRequest) {
     conversationId = created!.id
   }
 
-  const [{ data: vaultNotes }, { data: todayEvents }, { data: profile }, { count: topicsThisSession }] = await Promise.all([
+  const [{ data: vaultNotes }, { data: todayEvents }, { data: profile }] = await Promise.all([
     supabase
       .from("vault_notes")
       .select("title, topic, content_md, entity_type")
@@ -332,13 +333,9 @@ export async function POST(req: NextRequest) {
       .eq("scheduled_for", today),
     supabase
       .from("profiles")
-      .select("display_name, onboarded")
+      .select("display_name, onboarded, base_profile")
       .eq("id", user.id)
       .single(),
-    supabase
-      .from("extractions")
-      .select("*", { count: "exact", head: true })
-      .eq("conversation_id", conversationId),
   ])
 
   const isOnboarding = profile?.onboarded === false
@@ -372,17 +369,40 @@ export async function POST(req: NextRequest) {
     : ""
 
   const incompleteThreads = (vaultNotes ?? [])
-    .filter((n) => n.entity_type && n.content_md?.includes("incomplete: true"))
+    // A node is unfinished if flagged incomplete, OR if it slipped in under a placeholder
+    // title ("another mall") — the latter has no incomplete flag but still needs a real name,
+    // so surface it here to self-heal legacy/leaked junk instead of orphaning it.
+    .filter((n) => n.entity_type && (n.content_md?.includes("incomplete: true") || isPlaceholderName(n.title)))
     .map((n) => {
+      if (isPlaceholderName(n.title)) return `- ${n.title} (${n.entity_type}): still need its real name`
       const missing = getTier1Missing(n.entity_type as EntityType, n.content_md ?? "")
       return `- ${n.title} (${n.entity_type})${missing.length ? `: still need ${missing.join(", ")}` : " — tier 1 complete, could use more detail"}`
     })
     .join("\n")
 
-  const sessionTopicCount = topicsThisSession ?? 0
-  const sessionContext = sessionTopicCount >= 3
-    ? `## Session depth: ${sessionTopicCount} entities captured this session. You've covered a good amount — after the current thread, propose wrapping as a question ("want to pick this up tomorrow?") and let them decide. Do not start new entities after this.`
-    : `## Session depth: ${sessionTopicCount} of 3 entities captured this session.`
+  // Session length is measured in user turns, not entities: one rich story can spawn 5
+  // entities without the chat feeling long, so an entity count wrapped conversations after
+  // ~2 turns. Turns track how much the person has actually said.
+  const userTurns = messages.filter((m) => m.role === "user").length
+  const sessionContext = userTurns >= 10
+    ? `## Session depth: ${userTurns} exchanges so far. You've covered a good amount — once the current thread wraps up, propose picking this up another time as a question ("want to continue this tomorrow?") and let them decide. Don't start brand-new topics after this.`
+    : `## Session depth: ${userTurns} exchanges so far — still plenty of room, keep exploring.`
+
+  // Ground-layer profile: a few base facts (occupation, where they live, age) anchor everything
+  // else and matter most for tailoring. Fill them ONLY in a lull — nothing active to talk about —
+  // and only one, gently, permission-first. Occupation lives as an `org` node; the other two on
+  // profiles.base_profile. ponytail: frequency is left to the model's judgment (one soft line); if
+  // it over-asks in testing, gate to once-per-session + a declined[] list on base_profile.
+  const baseProfile = (profile?.base_profile ?? {}) as { age?: number; home_location?: string }
+  const missingBaseSlots = [
+    !(vaultNotes ?? []).some((n) => n.entity_type === "org") && "their occupation (student, working, what they do)",
+    !baseProfile.home_location && "where they live (home city or country)",
+    !baseProfile.age && "roughly how old they are",
+  ].filter(Boolean) as string[]
+  const inLull = !agenda.current && agenda.pending.length === 0
+  const baseProfileNudge = inLull && missingBaseSlots.length
+    ? `## Quiet moment — one gentle profile question is welcome\nThere's nothing active to dig into right now, and you still don't know: ${missingBaseSlots[0]}. If it feels natural, you may ask permission first ("mind if I ask something about you?") and then ask this ONE thing lightly. Only if the moment is calm — never force it, never stack it onto another question, and drop it instantly if they'd rather not say.`
+    : ""
 
   const systemPrompt = isOnboarding
     ? ONBOARDING_PROMPT.replace("[name]", profile?.display_name ?? "there")
@@ -392,6 +412,7 @@ export async function POST(req: NextRequest) {
         incompleteThreads ? `## Unfinished from last session — pick these up naturally when relevant:\n${incompleteThreads}` : "",
         todayContext,
         sessionContext,
+        baseProfileNudge,
         buildAgendaContext(agenda),
         // Closing recap: the persona rules above compete with a wall of facts, and the facts
         // are the freshest thing the model reads before generating. Re-state the 4 most-broken

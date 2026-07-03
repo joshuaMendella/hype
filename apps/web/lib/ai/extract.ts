@@ -40,7 +40,7 @@ export type RawEntity = {
   title: string
   topic: string
   brand: string | null
-  entity_type: "item" | "brand" | "place" | "event" | "person"
+  entity_type: "item" | "brand" | "place" | "event" | "person" | "org"
   tags: string[]
   intent: boolean
   intent_confidence?: number
@@ -51,7 +51,7 @@ export type RawEntity = {
   relations?: { to: string; label: string }[]
   refines?: string
 }
-export type ExtractionResult = { attributes: Attr[]; entities: RawEntity[] }
+export type ExtractionResult = { attributes: Attr[]; entities: RawEntity[]; user_age?: number; user_home_location?: string }
 
 const toSlug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
 
@@ -71,11 +71,11 @@ function mergeEntity(target: AgendaItem, entity: RawEntity) {
   }
 }
 
-// A place's or person's identity is its name. Once a Name attribute arrives, adopt it
-// as the title so the node isn't stranded under a generic placeholder ("Mall" →
-// "Galeria Rzeszow"). Items keep their category-noun title (they have no Name).
+// A place's, person's, or org's identity is its name. Once a Name attribute arrives, adopt
+// it as the title so the node isn't stranded under a generic placeholder ("Mall" →
+// "Galeria Rzeszow", "my job" → "Acme"). Items keep their category-noun title (no Name).
 function applyNameAsTitle(item: AgendaItem) {
-  if (item.entity_type !== "place" && item.entity_type !== "person") return
+  if (item.entity_type !== "place" && item.entity_type !== "person" && item.entity_type !== "org") return
   const name = item.attributes.find((a) => a.title.toLowerCase() === "name")?.value?.trim()
   if (name && name.toLowerCase() !== item.title.toLowerCase()) item.title = name
 }
@@ -281,6 +281,16 @@ export async function extractFacts(
   extraction: ExtractionResult
 ) {
   const supabase = createAdminClient()
+
+  // User self-facts (age, home location) live on the profile, not the graph. Read-merge-write
+  // so a newly-learned age doesn't clobber an existing home_location and vice versa.
+  if (extraction.user_age || extraction.user_home_location) {
+    const { data: prof } = await supabase.from("profiles").select("base_profile").eq("id", userId).single()
+    const base = { ...((prof?.base_profile as Record<string, unknown>) ?? {}) }
+    if (extraction.user_age) base.age = extraction.user_age
+    if (extraction.user_home_location) base.home_location = extraction.user_home_location
+    await supabase.from("profiles").update({ base_profile: base }).eq("id", userId)
+  }
 
   const { data: conv } = await supabase.from("conversations").select("agenda").eq("id", conversationId).single()
   let agenda: Agenda = (conv?.agenda as Agenda) ?? { current: null, pending: [] }

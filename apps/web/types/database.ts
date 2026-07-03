@@ -13,6 +13,9 @@ export interface Profile {
   // Per-category ad consent — { [affiliateCategory]: boolean }. A referral is only
   // "verified consent" (and worth CPC/CPA) when its category is true here.
   ad_preferences: Record<string, boolean>
+  // Ground-layer demographics for ad targeting, filled gradually via lull nudges.
+  // Occupation is NOT here — it lives as an `org` vault_note.
+  base_profile: { age?: number; home_location?: string }
   created_at: string
   updated_at: string
 }

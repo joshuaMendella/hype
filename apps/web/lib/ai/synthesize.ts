@@ -32,6 +32,9 @@ const INTENT_MARKERS = [
 // the interviewer circles back for the real name instead of closing on the placeholder.
 const GENERIC_PLACE = "mall|store|shop|place|spot|restaurant|cafe|coffee ?shop|bar|gym|park|market|salon|barber"
 const PLACEHOLDER_NAME = new RegExp(`^((the|a|an|another|some|that|this|my)\\s+)?(${GENERIC_PLACE})s?$|^(somewhere|someplace)$`, "i")
+// Also used at read time (route.ts) so a node that leaked in with a placeholder title
+// before this filter existed still resurfaces as unfinished instead of orphaning.
+export const isPlaceholderName = (s: string) => PLACEHOLDER_NAME.test(s.trim())
 function keepAttr(a: Attr): boolean {
   if (!a.value?.trim()) return false
   if (a.title?.toLowerCase() === "name" && PLACEHOLDER_NAME.test(a.value.trim())) return false
@@ -98,8 +101,11 @@ export const SCHEMA = {
         required: ["title", "entity_type", "tags", "brand", "intent", "intent_confidence", "intent_utterance", "scheduled_for", "description", "attributes", "relations", "refines"],
       },
     },
+    // Facts about the USER themselves (not an entity). 0 / "" when not stated this window.
+    user_age: { type: "number", description: "The user's own age if they state it this window, else 0" },
+    user_home_location: { type: "string", description: "Where the user lives (home city/country) if stated this window, else \"\"" },
   },
-  required: ["attributes", "entities"],
+  required: ["attributes", "entities", "user_age", "user_home_location"],
 } as const
 
 export const SYSTEM = `You are an extraction engine for a personal knowledge graph. You read a short slice of a conversation between an interviewer (assistant) and a user, and pull out durable facts about the user. You do NOT talk to the user — you only return structured data.
@@ -121,6 +127,13 @@ export const SYSTEM = `You are an extraction engine for a personal knowledge gra
 - place: a location they go to
 - person: someone in their life
 - event: something that happens at a time
+- org: an organization the user belongs to — employer, workplace, school, team, club. Work/job/career, "my company", "where I work", "my school" all map here.
+
+## facts about the USER themselves (not entities)
+The user's own age and where they live describe the person, not a thing in their life. Route these to the top-level fields, NOT to entities:
+- They state their age ("I'm 28", "just turned 30") → user_age. Otherwise user_age: 0.
+- They state where they live ("I live in Rzeszów", "I'm from Berlin", "my city is X") → user_home_location. Otherwise user_home_location: "".
+Their occupation is different — that IS an entity (an org). Capture a job/employer/school as an org entity as usual.
 
 ## brand — link an item to the store when one is named
 When the user is shopping for, looking at, or bought an item at a named store or brand in the same slice ("pants at H&M", "shoes from Nike"), set that item's brand field to that store/brand. Do NOT leave brand empty when the store is named — the item and its brand belong linked. Only leave brand empty when no store/brand is mentioned for that item.
@@ -150,6 +163,7 @@ intent: true ONLY when the user expresses a forward-looking desire to acquire or
 - person → **Name** (if known) and **Relationship** (friend, sister, coworker).
 - event → **When** — a date or relative time ("next week", "in August"). The title says WHAT the event is; When says when.
 - brand → **Category** (coffee shop, clothing store). The brand's name is the title.
+- org → **Name** (the employer/school/team) and **Role** (their job title or what they do there). Title is the org's name; if the name is unknown, omit Name and it stays a thread until named.
 Use these exact Title-Case attribute names. Never substitute (not "Timeframe" for When, not "Destination" for Where).
 
 ## refines — collapse mentions of the same thing
@@ -217,7 +231,7 @@ type ParsedEntity = {
   refines: string
 }
 
-type RawParsed = { attributes: Attr[]; entities: ParsedEntity[] }
+type RawParsed = { attributes: Attr[]; entities: ParsedEntity[]; user_age?: number; user_home_location?: string }
 
 // Gemini wants an OpenAPI-subset schema (uppercase types, no additionalProperties).
 function toGeminiSchema(s: any): any {
@@ -330,7 +344,10 @@ export async function synthesize(
     }
   })
 
-  return { attributes: (parsed.attributes ?? []).filter(keepAttr), entities }
+  // User self-facts (age/home) route to profiles.base_profile, not to the graph. 0/"" = not stated.
+  const user_age = parsed.user_age && parsed.user_age > 0 ? parsed.user_age : undefined
+  const user_home_location = parsed.user_home_location?.trim() ? parsed.user_home_location.trim() : undefined
+  return { attributes: (parsed.attributes ?? []).filter(keepAttr), entities, user_age, user_home_location }
 }
 
 // ponytail: one runnable check — `npx tsx lib/ai/synthesize.ts` from apps/web.
