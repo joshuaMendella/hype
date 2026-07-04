@@ -10,9 +10,10 @@ export default async function GraphPage() {
 
   if (!user) redirect("/login")
 
-  const [{ data: notes }, { data: links }] = await Promise.all([
+  const [{ data: notes }, { data: links }, { data: profile }] = await Promise.all([
     supabase.from("vault_notes").select("id, title, topic, path, content_md, intent, source, entity_type"),
     supabase.from("vault_links").select("id, source_note_id, target_note_id, anchor_text, link_type"),
+    supabase.from("profiles").select("display_name, base_profile").eq("id", user.id).single(),
   ])
 
   const userName: string | null = user.user_metadata?.display_name ?? null
@@ -62,7 +63,13 @@ export default async function GraphPage() {
 
   return (
     <div className="h-screen w-screen overflow-hidden relative">
-      <GraphWrapper initialData={graphData} userId={user.id} userName={userName} initialHistory={initialHistory} />
+      <GraphWrapper
+        initialData={graphData}
+        userId={user.id}
+        userName={userName}
+        initialProfile={{ display_name: profile?.display_name ?? userName, base_profile: profile?.base_profile ?? {} }}
+        initialHistory={initialHistory}
+      />
     </div>
   )
 }

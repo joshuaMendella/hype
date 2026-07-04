@@ -5,30 +5,9 @@ import * as d3 from "d3"
 import { createClient } from "@/lib/supabase/client"
 import type { GraphData, GraphNode, GraphLink, VaultNote } from "@/types/database"
 import { parseAttributes } from "./parseAttributes"
+import { nodeColorFor, DEFAULT_SETTINGS, type GraphSettings } from "@/lib/graph/palettes"
 
 const escHtml = (s: string) => s.replace(/[&<>]/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;"))
-
-const TOPIC_COLORS: Record<string, string> = {
-  Profile:        "#ffffff",
-  Work:           "#60a5fa", Finance:      "#93c5fd", Education:  "#818cf8", Technology: "#6366f1",
-  Relationships:  "#a78bfa", Social:       "#c084fc", Community:  "#d8b4fe", Parenting:  "#e879f9",
-  Style:          "#f472b6", Beauty:       "#fb7185",
-  Food:           "#fb923c", Home:         "#fbbf24",
-  Health:         "#4ade80", Sports:       "#34d399", Hobbies:    "#2dd4bf",
-  Goals:          "#facc15", Beliefs:      "#eab308", Identity:   "#fde68a",
-  Travel:         "#67e8f9", Location:     "#22d3ee",
-  Entertainment:  "#f9a8d4", Gaming:       "#c026d3", Creativity: "#a855f7", Events: "#f0abfc",
-  "Life Events":  "#94a3b8", "Life Stage": "#64748b", Childhood:  "#fca5a5", Routine:    "#86efac",
-  Pets:           "#fde047", Vehicle:      "#94a3b8", "Real Estate": "#78716c",
-}
-
-const DEFAULT_COLOR = "#6b7280"
-
-// One color axis: every node colored by topic/theme. entity_type is conveyed by the
-// tooltip, not a second color language (that split-brain was the old bug).
-function nodeColor(node: GraphNode): string {
-  return TOPIC_COLORS[node.topic ?? ""] ?? DEFAULT_COLOR
-}
 
 // Size scales with connections — hubs are big, leaves are small
 function nodeRadius(degree: number) {
@@ -52,9 +31,11 @@ function noteToNode(note: Pick<VaultNote, "id" | "title" | "topic" | "path" | "i
 interface Props {
   initialData: GraphData
   refreshTrigger?: number
+  settings?: GraphSettings
 }
 
-export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
+export default function GraphCanvas({ initialData, refreshTrigger, settings = DEFAULT_SETTINGS }: Props) {
+  const palette = settings.palette
   const svgRef = useRef<SVGSVGElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
   const zoomTransformRef = useRef<d3.ZoomTransform | null>(null)
@@ -206,13 +187,13 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
     // Outer glow ring
     const glow = node.append("circle")
       .attr("r", (d) => nodeRadius(degreeMap[d.id] ?? 0) + 5)
-      .attr("fill", (d) => nodeColor(d))
+      .attr("fill", (d) => nodeColorFor(d.topic, palette))
       .attr("opacity", 0.1)
 
     // Main circle — every node filled and colored by topic (one color axis)
     const core = node.append("circle")
       .attr("r", (d) => isNew(d.id) ? 0 : nodeRadius(degreeMap[d.id] ?? 0))
-      .attr("fill", (d) => nodeColor(d))
+      .attr("fill", (d) => nodeColorFor(d.topic, palette))
       .attr("opacity", 0.85)
 
     // Dramatize node birth: new nodes scale in with an elastic pop + a one-shot glow pulse.
@@ -293,7 +274,7 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
         )
       })
     }
-  }, [graphData])
+  }, [graphData, palette])
 
   useEffect(() => {
     draw()
@@ -332,7 +313,7 @@ export default function GraphCanvas({ initialData, refreshTrigger }: Props) {
 
   return (
     <>
-      <svg ref={svgRef} className="w-full h-full" style={{ background: "transparent" }} />
+      <svg ref={svgRef} className="w-full h-full transition-colors duration-300" style={{ background: settings.background }} />
       <div
         ref={tooltipRef}
         className="fixed pointer-events-none text-xs bg-black/85 text-white/80 px-2.5 py-1.5 rounded-md border border-white/10 opacity-0 transition-opacity duration-100 z-50 max-w-xs leading-relaxed"

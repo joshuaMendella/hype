@@ -86,7 +86,7 @@ The full session-by-session build log lives in **[CHANGELOG.md](CHANGELOG.md)** 
 
 ## What's NOT done yet (next steps in order)
 1. Landing page **polish** — page is built (session 16, `components/marketing/`); needs a visual pass (hero legibility, consent-toggle feel, copy) per user feedback
-2. Vercel deployment
+2. Vercel deployment — **pre-deploy blocker**: wire the "Delete account" row (currently a disabled placeholder in UserMenu) to real GDPR deletion + add privacy/legal copy. User menu itself is built (session 19: Profile+Gender, Graph settings, Manage nodes, Export, Logout).
 3. Affiliate link integration — Amazon Associates, Ticketmaster, Booking.com (Day 1 ad revenue, no advertiser deals needed)
 4. Ad moment UI — sponsored offer card inside ChatPanel, clearly labeled, triggered only after user says yes
 5. Mobile app (Expo) — only after web is live and validated
@@ -129,17 +129,19 @@ apps/web/
 │   ├── (auth)/signup/page.tsx
 │   ├── (app)/graph/page.tsx        ← home screen (server component, passes data to GraphWrapper)
 │   ├── api/chat/route.ts           ← AI interviewer endpoint
-│   └── api/vault/                  ← not built yet
+│   └── api/vault/export/route.ts   ← vault → hype-vault.zip (jszip, RLS user client)
 ├── components/
 │   ├── graph/
-│   │   ├── GraphCanvas.tsx         ← D3 graph (refreshTrigger prop, no polling)
-│   │   └── GraphWrapper.tsx        ← client wrapper: shares refreshTrigger between canvas + chat
+│   │   ├── GraphCanvas.tsx         ← D3 graph (refreshTrigger + settings props; colors via lib/graph/palettes)
+│   │   └── GraphWrapper.tsx        ← client wrapper: shares refreshTrigger + graph settings across canvas/chat/menu
 │   ├── marketing/                  ← landing page (Landing, DemoGraph, ConsentPanel, TalkDemo, GrowthTimeline, Nav, Reveal, graphData)
+│   ├── menu/UserMenu.tsx           ← avatar chip → slide-over drawer: Profile, Graph settings, Manage nodes, Export, Logout
 │   └── chat/ChatPanel.tsx          ← AI chat overlay (onReply callback)
 ├── lib/
 │   ├── supabase/client.ts          ← browser client
 │   ├── supabase/server.ts          ← SSR client
 │   ├── supabase/admin.ts           ← service role (server-only)
+│   ├── graph/palettes.ts           ← node-color source of truth: topic map + 4 palette modes + backgrounds + localStorage settings
 │   └── ai/
 │       ├── synthesize.ts           ← Cerebras gpt-oss-120b extraction pass (strict json_schema) — feeds extractFacts; runs async off the chat turn; model swappable in one fetch block
 │       ├── extract.ts              ← extractFacts: agenda gravity + vault writes (now fed by synthesize.ts, no longer LLM-coupled)

@@ -15,7 +15,7 @@ export interface Profile {
   ad_preferences: Record<string, boolean>
   // Ground-layer demographics for ad targeting, filled gradually via lull nudges.
   // Occupation is NOT here — it lives as an `org` vault_note.
-  base_profile: { age?: number; home_location?: string }
+  base_profile: { age?: number; home_location?: string; gender?: string }
   created_at: string
   updated_at: string
 }
