@@ -115,7 +115,8 @@ pnpm dev  # runs all apps via turbo
 NEXT_PUBLIC_SUPABASE_URL=https://aykjvvtolkaqvijfeewn.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
-GROQ_API_KEY=...          ← chat (free, console.groq.com)
+GEMINI_API_KEY=...        ← chat + extraction primary (Gemini 2.5 Flash)
+CEREBRAS_API_KEY=...       ← fallback for both (gpt-oss-120b) if Gemini fails/rate-limits
 ANTHROPIC_API_KEY=...     ← optional; only if extraction (lib/ai/synthesize.ts) is swapped from Cerebras to Anthropic Sonnet. Not required.
 ```
 

@@ -152,6 +152,13 @@ CREATE INDEX IF NOT EXISTS idx_conversations_user  ON public.conversations(user_
 ALTER TABLE public.vault_notes ADD COLUMN IF NOT EXISTS entity_type TEXT;
 ALTER TABLE public.vault_links ADD COLUMN IF NOT EXISTS link_type TEXT DEFAULT 'brand';
 
+-- Intent flag + scheduled event date (queried every chat turn for the today-events opener).
+-- These exist in the live DB but were missing here — a fresh setup would break without them.
+ALTER TABLE public.vault_notes ADD COLUMN IF NOT EXISTS intent BOOLEAN DEFAULT false;
+ALTER TABLE public.vault_notes ADD COLUMN IF NOT EXISTS scheduled_for DATE;
+CREATE INDEX IF NOT EXISTS idx_vault_notes_scheduled
+  ON public.vault_notes(user_id, scheduled_for) WHERE scheduled_for IS NOT NULL;
+
 -- Phase 4 — advertiser data layer
 -- Per-category ad consent: { "fashion": true, "electronics": false, ... }
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS ad_preferences JSONB DEFAULT '{}'::jsonb;

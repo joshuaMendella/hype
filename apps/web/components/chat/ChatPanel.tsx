@@ -34,18 +34,27 @@ function useTypewriter(text: string, speed = 85) {
   return { displayed, done }
 }
 
-export default function ChatPanel({ userId, userName: _userName, onReply }: { userId: string; userName: string | null; onReply?: () => void }) {
-  const [history, setHistory] = useState<ChatMessage[]>([])
-  const [currentAi, setCurrentAi] = useState("")
-  const [aiVisible, setAiVisible] = useState(false)
+export default function ChatPanel({ userId, userName: _userName, initialHistory = [], onReply }: { userId: string; userName: string | null; initialHistory?: ChatMessage[]; onReply?: () => void }) {
+  // Restore an active (<2h) conversation on reload: seed prior turns so the model keeps context,
+  // and show the last AI line where we left off. One message at a time — no scrollback. Messages
+  // are always saved user→assistant pairs, so the last is the AI's line: split it out as currentAi.
+  const lastMsg = initialHistory[initialHistory.length - 1]
+  const seedAi = lastMsg?.role === "assistant" ? lastMsg.content : ""
+  const seeded = seedAi !== ""
+  const seedHistory = seeded ? initialHistory.slice(0, -1) : initialHistory
+
+  const [history, setHistory] = useState<ChatMessage[]>(seedHistory)
+  const [currentAi, setCurrentAi] = useState(seedAi)
+  const [aiVisible, setAiVisible] = useState(seeded)
   const [input, setInput] = useState("")
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!seeded)
   const [canInput, setCanInput] = useState(false)
   const [focused, setFocused] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const { displayed, done } = useTypewriter(currentAi)
 
   useEffect(() => {
+    if (seeded) return // restored an active conversation — show where we left off, no opener fetch
     fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -55,7 +64,7 @@ export default function ChatPanel({ userId, userName: _userName, onReply }: { us
       .then(({ reply }) => { setCurrentAi(reply); setAiVisible(true) })
       .catch(() => { setCurrentAi("Hey — what have you been up to today?"); setAiVisible(true) })
       .finally(() => setLoading(false))
-  }, [userId])
+  }, [userId, seeded])
 
   useEffect(() => {
     if (done) setCanInput(true)
@@ -97,6 +106,9 @@ export default function ChatPanel({ userId, userName: _userName, onReply }: { us
       const { reply } = await res.json()
       setCurrentAi(reply)
       onReply?.()
+    } catch {
+      // network failure / bad JSON — surface it instead of an unhandled rejection + silent stall
+      setCurrentAi("Something slipped on my end — want to try that again?")
     } finally {
       setLoading(false)
       setAiVisible(true)

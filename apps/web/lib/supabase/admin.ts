@@ -1,3 +1,4 @@
+import "server-only" // build fails if this module is ever pulled into a client bundle (service-role key must never reach the browser)
 import { createClient } from "@supabase/supabase-js"
 
 // Admin client — bypasses RLS using service role key

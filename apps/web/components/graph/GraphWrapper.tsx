@@ -9,14 +9,15 @@ interface Props {
   initialData: GraphData
   userId: string
   userName: string | null
+  initialHistory?: { role: "user" | "assistant"; content: string }[]
 }
 
-export default function GraphWrapper({ initialData, userId, userName }: Props) {
+export default function GraphWrapper({ initialData, userId, userName, initialHistory }: Props) {
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   return (
     <>
       <GraphCanvas initialData={initialData} refreshTrigger={refreshTrigger} />
-      <ChatPanel userId={userId} userName={userName} onReply={() => setRefreshTrigger((t) => t + 1)} />
+      <ChatPanel userId={userId} userName={userName} initialHistory={initialHistory} onReply={() => setRefreshTrigger((t) => t + 1)} />
     </>
   )
 }
