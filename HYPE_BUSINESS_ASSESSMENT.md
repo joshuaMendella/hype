@@ -55,8 +55,15 @@ Brave browser demonstrates $1/MAU/year is achievable with a far less rich target
 | **Limitless AI** | Passive audio capture + AI recall | $19/mo | Retrieval | No | $35M+ raised |
 | **Mem0** | Memory API layer for dev tools | Dev API ($0.02/1K ops) | Infrastructure | No | $24M (YC, Peak XV) |
 | **Google NotebookLM** | Document Q&A + audio | Free | Grounded retrieval | No | Google-funded |
+| **ChatGPT / Gemini (memory + commerce)** | Assistant that remembers you, moving into shopping/checkout | Free / $20/mo | Frontier | No | Effectively unlimited |
 
-**Gap in the market:** Every competitor either requires the user to *actively file information* (Notion, Obsidian, Logseq) or passively captures everything and filters it (Limitless). No one runs a structured, goal-directed interview to *extract* and *categorize* facts about the user's life. Hype occupies this position.
+**Gap in the market:** Every *PKM* competitor either requires the user to *actively file information* (Notion, Obsidian, Logseq) or passively captures everything and filters it (Limitless). No one runs a structured, goal-directed interview to *extract* and *categorize* facts about the user's life. Hype occupies this position.
+
+**The real threat is not in the PKM column — it's the frontier labs.** ChatGPT already remembers facts across conversations and OpenAI is openly pushing into shopping and commerce; "an assistant that remembers you and surfaces offers" is a one-sentence description of Hype, shippable by a company with hundreds of millions of daily users and no audience to acquire. We do not out-build them on model or memory — that is commoditizing. We beat them on the two things an ad-funded incumbent structurally *cannot* copy without undermining itself:
+- **A visible, editable graph.** Their memory is an invisible black box the user can't see or correct; ours *is* the home screen — "here's exactly what I know about you," every fact editable and deletable.
+- **Consent-per-moment ads.** An ad-funded giant has every incentive to blur offers into "helpful" assistant suggestions — the exact opposite of "we always ask first." Reducing ad load to preserve trust is a move they can't make; for us it's the whole brand.
+
+The strategic conclusion: lean *harder* into visible-graph + always-ask. The defensible ground is the posture, not the plumbing.
 
 ---
 
@@ -77,7 +84,7 @@ Brave browser demonstrates $1/MAU/year is achievable with a far less rich target
 
 **Defensible moats (in order of build time):**
 1. **Extraction quality** — The 5-layer pipeline with no-inference rules is a durable, hard-to-clone data layer. Every competitor that adds "AI auto-organization" collapses facts into tags; Hype builds a semantic graph.
-2. **Interview corpus** — Over time, conversation history + interview strategy becomes a training dataset and moat. The interviewer learns what to ask next.
+2. **Interview strategy** — Over time the interviewer gets better at *what to ask next*, learned from aggregate question→outcome patterns (which prompts yield durable facts, which dead-end). The moat is the questioning strategy, not the user data: no individual's conversation becomes training fuel — that would break principle 4 (advertisers buy referrals, never data; the profile never leaves the platform).
 3. **Vault portability** — Obsidian compatibility is a trust signal that pulls users who reject lock-in. This is a counter-positioning move against Notion.
 4. **Graph home screen** — Visceral, visual feedback loop that competitors focused on text list UIs can't easily replicate without a full rebuild.
 
@@ -116,7 +123,7 @@ The product is free forever. There is no subscription wall. Revenue comes entire
 **Key brand promise to users:** *"Be in control of your ads. Only see what you want, when you want it. The real you gets the real offers."*
 
 **Advertiser go-to-market sequence:**
-1. **Phase 1 (0–10K users):** No ads yet. Build the vault. Prove retention.
+1. **Phase 1 (0–10K users):** No *direct advertiser* deals yet. Affiliate offers begin as soon as a pertinent, high-confidence match exists — gated on match quality, not vault size (BUSINESS.md principle 6). Build the vault, prove retention.
 2. **Phase 2 (10K–50K users):** Hand-pick 3–5 brand partners in high-intent categories (fashion, events, travel). Manual deals, affiliate links. No ad tech stack needed.
 3. **Phase 3 (50K+ users):** Build a self-serve advertiser dashboard. Launch category-level targeting. Hire one sales person focused on D2C brands.
 4. **Phase 4:** Programmatic API — allow brands to bid on intent categories in real time. This is the long-term platform play.
@@ -130,13 +137,13 @@ The product is free forever. There is no subscription wall. Revenue comes entire
 
 ## 5. Unit Economics
 
-**Cost side — AI infrastructure (Groq Llama 3.3 70B):**
+**Cost side — AI infrastructure (Gemini 2.5 Flash primary; Cerebras gpt-oss-120b fallback — both on paid, no-training tiers):**
 
-| Usage level | Tokens/month | Monthly AI cost/user |
+| Usage level | Tokens/month | Monthly AI cost/user (est.) |
 |---|---|---|
-| Light (2–3 sessions/week) | ~15K input / 10K output | ~$0.017 |
-| Active (daily) | ~50K input / 35K output | ~$0.057 |
-| Heavy + extraction (Anthropic Sonnet, 5×/month) | +10K extraction tokens | +$0.18 |
+| Light (2–3 sessions/week) | ~15K input / 10K output | ~$0.01–0.02 |
+| Active (daily) | ~50K input / 35K output | ~$0.05–0.07 |
+| Heavy user + extraction pass, 5×/month (Gemini/Cerebras) | +10K extraction tokens | +$0.03 |
 
 | Metric | Per user/month |
 |---|---|
@@ -145,6 +152,8 @@ The product is free forever. There is no subscription wall. Revenue comes entire
 | **Total COGS/user/month** | **$0.15–$0.30** |
 
 COGS are near-zero. The heavy-user tail (top 5% driving 75% of compute) is the only cost risk; soft session throttling handles it without degrading the product for 95% of users.
+
+> *Dollar figures re-based to the current stack are estimates: both models sit in the same low-cost tier as the original Groq model (chat runs on cheap Flash-class inference; extraction on Cerebras/Gemini rather than the pricier Anthropic Sonnet once modeled), so the blended COGS conclusion holds — likely at the low end. A precise per-token recompute on current paid pricing is a pending to-do.*
 
 **Revenue side — advertiser model:**
 
@@ -192,8 +201,10 @@ Free products convert at 5–15× the rate of paywalled products at the top of t
 
 ## 6. Key Risks
 
+> *The mitigations for P1–P8 are now codified as BUSINESS.md core principles, which are the authoritative source. This register is a summary — where it and the principles differ, the principles win.*
+
 **P1 — Execution gap between the promise and the experience**  
-The brand promise is explicit: *you are in control, ads are tailored to the real you, nothing is forced.* The risk is not that users discover the business model — they know it. The risk is that the experience doesn't live up to it. A poorly matched offer, an offer surfaced too early in the relationship (vault too thin to know you well), or an offer that appears too frequently — any of these breaks the promise even though the contract was transparent. *Mitigation:* Gate ad moments behind vault maturity. A user with 10 fact nodes should never see a sponsored offer; a user with 80+ should see only highly confident matches. Offer quality is a product metric, not a sales metric.
+The brand promise is explicit: *you are in control, ads are tailored to the real you, nothing is forced.* The risk is not that users discover the business model — they know it. The risk is that the experience doesn't live up to it. A poorly matched offer, an offer surfaced too early in the relationship (vault too thin to know you well), or an offer that appears too frequently — any of these breaks the promise even though the contract was transparent. *Mitigation:* Gate ad moments on **match quality, not vault size** (BUSINESS.md principle 6): an offer fires only on a pertinent, high-confidence match — a strong match can surface early, a vague vault may never produce one. Offer quality is a product metric, not a sales metric.
 
 **P2 — Platform integrity under advertiser pressure**  
 As advertiser revenue grows, there will be pressure to increase placement frequency, lower targeting thresholds, or favor high-paying advertisers over relevance. This is how every ad-supported platform has eventually degraded (Google Search quality, Instagram feed). *Mitigation:* Hard product constraints, not policies: cap placements per session (e.g., max 1 per conversation), enforce a minimum confidence score for the vault match, and make the acceptance rate visible internally as a health metric. If acceptance rate drops, it means quality dropped — treat it like a P1 incident.
@@ -213,8 +224,8 @@ A hallucinated fact generates a bad ad placement ("you said you wanted blue shoe
 **P7 — Solo founder sequencing**  
 Users → affiliate revenue → direct advertisers is the right sequence. Skipping ahead to build an ad tech stack before 10K MAU is wasted effort. *Mitigation:* Affiliate links are a one-afternoon implementation. Direct advertiser deals are a conversation. Neither requires building a DSP.
 
-**P8 — LLM vendor risk**  
-Groq is single-vendor. If pricing spikes, margins compress immediately since users pay nothing. *Mitigation:* Wrap the `groq` call behind a provider interface before growth. Switching should be a config change.
+**P8 — LLM vendor risk (largely resolved)**  
+The single-vendor Groq risk is closed: the stack now runs Gemini 2.5 Flash primary with a Cerebras gpt-oss-120b fallback (both paid, no-training tiers), so a provider outage or price spike is already a fallback/config change, not a margin cliff. Residual: re-run §5 COGS on current paid pricing.
 
 ---
 

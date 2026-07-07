@@ -37,9 +37,93 @@
   animation: hype-float 9s ease-in-out infinite;
 }
 
+/* Hero entrance: badge → headline → subcopy → CTAs rise in sequence on load. */
+@keyframes hero-in {
+  from { opacity: 0; transform: translateY(22px); }
+  to { opacity: 1; transform: none; }
+}
+.hero-in {
+  opacity: 0;
+  animation: hero-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: var(--hero-delay, 0ms);
+}
+
+/* Gradient ink: key phrases are colored by the graph's own topic palette. */
+@keyframes ink-pan {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+.graph-ink {
+  background: linear-gradient(100deg, #60a5fa, #22d3ee, #4ade80, #fbbf24, #f472b6, #a855f7);
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: ink-pan 9s ease-in-out infinite;
+}
+.amber-ink {
+  background: linear-gradient(100deg, #fbbf24, #fb923c, #fbbf24);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: ink-pan 7s ease-in-out infinite;
+}
+
+/* Consent-panel offer card arriving — you flipped a switch, the offer shows up. */
+@keyframes offer-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+.offer-in {
+  animation: offer-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ── Landing light theme ─────────────────────────────────────────────
+   ThemeToggle sets data-theme="light" on <html>. Only marketing components use
+   the `light:` variant, so the app's dark graph screen is unaffected. */
+@custom-variant light (&:where([data-theme="light"], [data-theme="light"] *));
+
+:root {
+  /* DemoGraph/TalkDemo SVG colors are set from JS, so they live as vars. */
+  --g-link-self: #ffffff40;
+  --g-link-brand: #a78bfa73;
+  --g-link-relation: #ffffff59;
+  --g-label: #ffffff99;
+  --g-label-hub: #ffffffd9;
+  --g-you: #ffffff;
+}
+[data-theme="light"] {
+  --g-link-self: #00000059;
+  --g-link-brand: #7c3aed8c;
+  --g-link-relation: #0000006b;
+  --g-label: #000000b3;
+  --g-label-hub: #000000e6;
+  --g-you: #141414;
+}
+/* Inside an always-dark surface (the phone mocks), the graph keeps dark-mode colors. */
+.graph-dark {
+  --g-link-self: #ffffff40;
+  --g-link-brand: #a78bfa73;
+  --g-link-relation: #ffffff59;
+  --g-label: #ffffff99;
+  --g-label-hub: #ffffffd9;
+  --g-you: #ffffff;
+}
+/* Gradient inks need darker stops to stay legible on paper. */
+[data-theme="light"] .graph-ink {
+  background-image: linear-gradient(100deg, #2563eb, #0891b2, #16a34a, #d97706, #db2777, #7c3aed);
+}
+[data-theme="light"] .amber-ink {
+  background-image: linear-gradient(100deg, #d97706, #ea580c, #d97706);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .reveal { opacity: 1; transform: none; transition: none; }
   .hype-float { animation: none; }
+  .hero-in { opacity: 1; animation: none; }
+  .graph-ink, .amber-ink { animation: none; }
+  .offer-in { animation: none; }
 }
 
 @media (prefers-color-scheme: dark) {

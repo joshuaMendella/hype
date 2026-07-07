@@ -1,0 +1,37 @@
+# EAS upload ignore list. When present, EAS uses THIS instead of .gitignore,
+# so it must include everything .gitignore does — plus the Claude/agent tooling
+# dirs, which contain symlinks EAS can't recreate on Windows (EPERM: symlink).
+
+# --- mirror of root .gitignore ---
+node_modules
+.pnpm-store
+
+.next
+dist
+.turbo
+
+.env
+.env.local
+.env.*.local
+
+.DS_Store
+Thumbs.db
+
+.vscode/settings.json
+.idea
+
+.mcp.json
+
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+scratch/
+Hype__Suggestions.docx
+
+# --- EAS-only exclusions ---
+# Claude Code / agent skill dirs — symlinked on disk, not needed to build the app.
+.agents/
+.claude/
+# Docs & business notes — irrelevant to the native build, slims the upload.
+docs/

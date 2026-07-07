@@ -1,6 +1,27 @@
 packages:
   - "apps/*"
   - "packages/*"
+# React Native / Expo autolinking can't follow pnpm's default isolated (symlinked)
+# node_modules — the Expo monorepo guide recommends the hoisted linker to avoid
+# native build + resolution errors. Next.js (apps/web) works fine under hoisted too.
+nodeLinker: hoisted
 allowBuilds:
+  '@shopify/react-native-skia': true
   sharp: true
   unrs-resolver: true
+minimumReleaseAgeExclude:
+  - '@expo/ui@57.0.4'
+  - expo-linking@57.0.2
+  - expo-router@57.0.4
+  - '@expo/cli@57.0.6'
+  - '@expo/config-plugins@57.0.3'
+  - '@expo/config@57.0.3'
+  - '@expo/fingerprint@0.20.3'
+  - '@expo/inline-modules@0.1.2'
+  - '@expo/prebuild-config@57.0.5'
+  - '@expo/router-server@57.0.2'
+  - babel-preset-expo@57.0.2
+  - expo-modules-autolinking@57.0.5
+  - expo-modules-core@57.0.3
+  - expo-modules-jsi@57.0.1
+  - expo@57.0.4

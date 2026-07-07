@@ -13,21 +13,28 @@ type SimLink = { source: SimNode; target: SimNode; kind: DemoLink["kind"] }
 
 const W = 800
 const H = 600
-const radius = (n: DemoNode) => (n.id === "you" ? 15 : n.hub ? 10 : 6)
+const radius = (n: DemoNode) => (n.id === "you" ? 16 : n.hub ? 11 : 7)
 
+// Theme-aware (dark/light values live in globals.css; .graph-dark pins dark inside phone mocks)
 const LINK_STROKE: Record<DemoLink["kind"], string> = {
-  self: "#ffffff33",
-  brand: "#a78bfa55",
-  relation: "#ffffff4d",
+  self: "var(--g-link-self)",
+  brand: "var(--g-link-brand)",
+  relation: "var(--g-link-relation)",
 }
 
 export default function DemoGraph({
   progress = 1,
   className,
+  fill = false,
+  spread = 1,
 }: {
   /** 0..1 — reveal nodes up to this threshold (growth scrubber). Default: all. */
   progress?: number
   className?: string
+  /** Cover the container (hero backdrop) instead of letterboxing inside it. */
+  fill?: boolean
+  /** >1 pushes nodes outward — for backdrops where text owns the center. */
+  spread?: number
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const applyRef = useRef<(p: number, animate: boolean) => void>(() => {})
@@ -52,7 +59,7 @@ export default function DemoGraph({
       .selectAll("line")
       .data(links)
       .join("line")
-      .attr("stroke", (d) => LINK_STROKE[d.kind])
+      .style("stroke", (d) => LINK_STROKE[d.kind])
       .attr("stroke-width", 1.25)
       .attr("opacity", 0)
 
@@ -71,20 +78,19 @@ export default function DemoGraph({
       .attr("fill", (d) => d.color)
       .attr("opacity", 0.9)
 
-    node.filter((d) => !!d.hub)
-      .append("text")
+    node.append("text")
       .text((d) => d.label)
       .attr("dy", (d) => radius(d) + 15)
       .attr("text-anchor", "middle")
-      .attr("font-size", "12px")
-      .attr("fill", "#ffffffcc")
+      .attr("font-size", (d) => (d.hub ? "13px" : "11px"))
+      .style("fill", (d) => (d.hub ? "var(--g-label-hub)" : "var(--g-label)"))
       .attr("pointer-events", "none")
       .style("font-family", "var(--font-body), sans-serif")
       .attr("opacity", 0)
 
     const sim = d3.forceSimulation<SimNode>(nodes)
-      .force("link", d3.forceLink<SimNode, SimLink>(links).distance(70).strength(0.4))
-      .force("charge", d3.forceManyBody().strength(-260))
+      .force("link", d3.forceLink<SimNode, SimLink>(links).distance(82 * spread).strength(0.4))
+      .force("charge", d3.forceManyBody().strength(-320 * spread))
       .force("center", d3.forceCenter(W / 2, H / 2))
       .force("collision", d3.forceCollide<SimNode>().radius((d) => radius(d) + 14))
 
@@ -111,11 +117,11 @@ export default function DemoGraph({
         const tx = g2.select<SVGTextElement>("text")
         if (visible && animate && !reduce) {
           c.transition().duration(700).ease(d3.easeElasticOut.amplitude(1).period(0.5)).attr("r", radius(n))
-          gl.attr("opacity", 0.5).transition().duration(900).ease(d3.easeCubicOut).attr("opacity", 0.14)
+          gl.attr("opacity", 0.55).transition().duration(900).ease(d3.easeCubicOut).attr("opacity", 0.22)
           tx.transition().delay(200).duration(400).attr("opacity", 1)
         } else {
           c.transition().duration(250).attr("r", visible ? radius(n) : 0)
-          gl.transition().duration(250).attr("opacity", visible ? 0.14 : 0)
+          gl.transition().duration(250).attr("opacity", visible ? 0.22 : 0)
           tx.transition().duration(250).attr("opacity", visible ? 1 : 0)
         }
       })
@@ -153,7 +159,7 @@ export default function DemoGraph({
     <svg
       ref={svgRef}
       viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="xMidYMid meet"
+      preserveAspectRatio={fill ? "xMidYMid slice" : "xMidYMid meet"}
       className={className}
       aria-hidden="true"
     />

@@ -20,8 +20,8 @@ This is also the GDPR story (rectification, erasure, portability). Storing age, 
 ### 3. Retention loop is undefined
 The interviewer collects well, but the product gives nothing back besides watching dots appear. What brings someone back on day 3? Cheap utility win: the vault stores `scheduled_for` events — surface "you mentioned X is next week", or let users query their own vault ("what was that coffee place I mentioned?"). Recall is the first genuinely selfish reason to keep feeding it.
 
-### 4. Consent capture doesn't exist yet
-`profiles.ad_preferences` is in the schema but nothing writes or reads it. Onboarding *mentions* deals but records no consent. When the ad-moment card is built, gate it on an explicit toggle — that's also the screenshot that sells the landing page.
+### 4. ~~Consent capture doesn't exist yet~~ — SUPERSEDED (2026-07-05)
+> **Superseded by decision in `BUSINESS.md` principle 2:** consent is per-moment and conversational — the assistant asks before every ad, in chat. There is no toggle and no ad-settings page, by design. `profiles.ad_preferences` is deprecated (unused; drop in a future migration). The original text recommended a toggle; do not build one.
 
 ## Code / security findings
 

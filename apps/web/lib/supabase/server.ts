@@ -1,4 +1,5 @@
 import { createServerClient } from "@supabase/ssr"
+import { createClient as createSupabaseClient } from "@supabase/supabase-js"
 import { cookies } from "next/headers"
 
 // Server client — reads auth session from cookies, restricted by RLS
@@ -24,6 +25,20 @@ export async function createClient() {
           }
         },
       },
+    }
+  )
+}
+
+// Bearer-token client for non-cookie callers (the Expo app sends the user's JWT
+// as `Authorization: Bearer <token>`). The token rides on every PostgREST request,
+// so RLS still scopes queries to that user — same guarantees as the cookie path.
+export function createBearerClient(token: string) {
+  return createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
     }
   )
 }

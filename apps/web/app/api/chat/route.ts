@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse, after } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { createClient, createBearerClient } from "@/lib/supabase/server"
 import { extractFacts, closeSession } from "@/lib/ai/extract"
 import { synthesize, isPlaceholderName } from "@/lib/ai/synthesize"
 import { CHECKLIST_PROMPT, type Agenda } from "@/lib/ai/checklists"
@@ -16,6 +16,44 @@ const CEREBRAS_KEY = process.env.CEREBRAS_API_KEY
 const CEREBRAS_CHAT_MODEL = "gpt-oss-120b"
 
 type ChatMsg = { role: "user" | "assistant"; content: string }
+
+// ── Ad moment (draft) — first consent-based ad flow ───────────────────────
+// State is derived from message history each turn (no DB column): a literal
+// [show-ad] marker in the user's turn opens the flow, and the exact text of
+// the last assistant turn tells us whether we're mid-flow. See isAdFlowMessage
+// and the short-circuit block in POST below.
+type AdCard = { sponsor: string; name: string; price: string; image: string; url: string }
+// Draft ad product. Image is self-hosted in /public (real Zara product shot the
+// owner saved) so it always loads. url points at Zara's men's shirts category —
+// stable, won't 404. Swap for a real affiliate deep-link when monetized.
+const ZARA_AD: AdCard = {
+  sponsor: "Zara",
+  name: "Striped Textured Shirt",
+  price: "$49.90",
+  image: "/zara-shirt.jpg",
+  url: "https://www.zara.com/us/en/man-shirts-l737.html",
+}
+const AD_CONSENT_LINE = "Quick one — I've got a shirt offer from Zara. Want a look? Totally fine to skip."
+const AD_INTRO_TEXT = "Here it is — tap the card for the full details on Zara's site."
+const AD_DECLINE_LINE = "No problem."
+
+function isAdFlowMessage(m: ChatMsg): boolean {
+  if (m.role === "user") return /\[show-ad\]/i.test(m.content)
+  return m.content === AD_CONSENT_LINE || m.content === AD_INTRO_TEXT || m.content === AD_DECLINE_LINE
+}
+
+// Deterministic yes/no classifier for the reply to AD_CONSENT_LINE — a binary
+// consent gate doesn't need an LLM call. NO-tokens are checked first so phrases
+// like "no thanks" never fall through to the short-message YES check.
+function classifyAdReply(content: string): "yes" | "no" | "ambiguous" {
+  const norm = content.trim().toLowerCase().replace(/[.!?]+$/, "")
+  const NO_TOKENS = ["no", "nah", "nope", "not now", "no thanks", "skip", "pass", "later", "maybe later", "don't"]
+  if (NO_TOKENS.includes(norm)) return "no"
+  const YES_TOKENS = ["yes", "yeah", "yep", "yup", "sure", "ok", "okay", "sounds good", "show me", "go for it", "why not", "please", "please do", "definitely", "y", "ye"]
+  const wordCount = norm.split(/\s+/).filter(Boolean).length
+  if (wordCount <= 5 && YES_TOKENS.includes(norm)) return "yes"
+  return "ambiguous"
+}
 
 async function geminiChat(system: string, history: ChatMsg[], jsonSchema?: object): Promise<string> {
   if (!GEMINI_KEY) throw new Error("GEMINI_API_KEY not set")
@@ -256,8 +294,14 @@ function buildAgendaContext(agenda: Agenda): string {
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  // Mobile (Expo) sends the user's JWT as a Bearer token; web uses the auth cookie.
+  const authHeader = req.headers.get("authorization")
+  const bearer = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null
+  const supabase = bearer ? createBearerClient(bearer) : await createClient()
+  // Cookie path: getUser() reads the session cookie. Bearer path: no persisted
+  // session exists, so the token must be passed explicitly for validation (the
+  // global Authorization header still scopes all data queries via RLS).
+  const { data: { user } } = await supabase.auth.getUser(bearer ?? undefined)
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -341,6 +385,39 @@ export async function POST(req: NextRequest) {
 
   const isOnboarding = profile?.onboarded === false
 
+  // ── Ad moment short-circuit (draft) — bypasses the interviewer entirely; ──
+  // never runs extraction, never touches the vault.
+  const adLastUserMsg = messages.findLast((m) => m.role === "user")
+  const hasAdMarker = !!adLastUserMsg && /\[show-ad\]/i.test(adLastUserMsg.content)
+  const lastAssistantMsg = [...messages].reverse().find((m) => m.role === "assistant")
+  const inAdProposed = lastAssistantMsg?.content === AD_CONSENT_LINE
+
+  async function persistAdTurn(userContent: string, assistantContent: string) {
+    await supabase.from("messages").insert([
+      { conversation_id: conversationId, role: "user", content: userContent },
+      { conversation_id: conversationId, role: "assistant", content: assistantContent },
+    ])
+  }
+
+  if (hasAdMarker && !isOnboarding && adLastUserMsg) {
+    // Stored raw, WITH the marker — same pattern as other [reviewer annotations].
+    await persistAdTurn(adLastUserMsg.content, AD_CONSENT_LINE)
+    return NextResponse.json({ reply: AD_CONSENT_LINE })
+  }
+
+  if (inAdProposed && !isOnboarding && adLastUserMsg) {
+    const verdict = classifyAdReply(adLastUserMsg.content)
+    if (verdict === "yes") {
+      await persistAdTurn(adLastUserMsg.content, AD_INTRO_TEXT)
+      return NextResponse.json({ reply: AD_INTRO_TEXT, card: ZARA_AD })
+    }
+    if (verdict === "no") {
+      await persistAdTurn(adLastUserMsg.content, AD_DECLINE_LINE)
+      return NextResponse.json({ reply: AD_DECLINE_LINE })
+    }
+    // ambiguous — fall through to the normal interviewer path below
+  }
+
   // Order the window so notes tied to what we're talking about lead — models weight the top
   // of a long context more than the middle, so the connect-the-dots facts should come first.
   // Stable sort: ties keep the query's recency order. (When the vault outgrows limit(20),
@@ -421,11 +498,14 @@ export async function POST(req: NextRequest) {
         REPLY_GUTCHECK,
       ].filter(Boolean).join("\n\n")
 
-  // strip [reviewer annotations] from user turns — stored raw in DB, invisible to LLM
-  const history: ChatMsg[] = messages.map((m) => ({
-    role: m.role,
-    content: m.role === "user" ? m.content.replace(/\[.*?\]/g, "").trim() : m.content,
-  }))
+  // strip [reviewer annotations] from user turns — stored raw in DB, invisible to LLM.
+  // Ad-flow turns are filtered out first so the interviewer never sees the ad exchange.
+  const history: ChatMsg[] = messages
+    .filter((m) => !isAdFlowMessage(m))
+    .map((m) => ({
+      role: m.role,
+      content: m.role === "user" ? m.content.replace(/\[.*?\]/g, "").trim() : m.content,
+    }))
 
   // Gemini 2.5 Flash primary; Cerebras gpt-oss-120b fallback.
   let raw: string
@@ -481,8 +561,10 @@ export async function POST(req: NextRequest) {
     // Extraction runs as a separate Sonnet pass over the recent window — off the hot path,
     // and never coupled to the conversational reply. Skipped during onboarding.
     if (!isOnboarding) {
+      // Ad-flow turns are excluded so the extractor never mines the ad exchange.
+      const messagesForExtraction = messages.filter((m) => !isAdFlowMessage(m))
       after(() =>
-        synthesize(messages, agenda, vaultNotes ?? [])
+        synthesize(messagesForExtraction, agenda, vaultNotes ?? [])
           .then((extraction) => extractFacts(conversationId, user.id, extraction))
           .then(() => (isFarewell ? closeSession(conversationId, user.id).then(() => {}) : undefined))
           .catch((err) => console.error("[chat] extraction failed:", err))

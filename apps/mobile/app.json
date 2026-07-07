@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "Hype",
+    "slug": "hype",
+    "version": "1.0.0",
+    "scheme": "hype",
+    "experiments": {
+      "typedRoutes": true
+    },
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.joshuamendella.hype"
+    },
+    "android": {
+      "package": "com.joshuamendella.hype",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "49fdea16-2d86-4b0b-8200-433bdd22540f"
+      }
+    },
+    "owner": "josh_mendel"
+  }
+}

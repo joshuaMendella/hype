@@ -2,6 +2,9 @@
 
 **Date:** 2026-07-03
 **Status:** Approved for planning
+> **Note (2026-07-05):** the §2 "consent toggle row" visual is **superseded** — consent is per-moment
+> conversational (see `BUSINESS.md` principle 2). The built `ConsentPanel.tsx` demos the real
+> ask-first flow and is the reference, not this spec's mock.
 **Route:** `/` (apps/web/app/page.tsx) — currently a placeholder redirect to `/signup`
 
 ## Goal

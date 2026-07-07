@@ -4,6 +4,8 @@
 AI-powered personal knowledge graph. An AI interviewer learns about the user over time and builds an Obsidian-compatible vault of markdown notes. The graph visualization IS the home screen — users watch their knowledge graph grow as they talk to the AI.
 
 ## Business model (session 4 decision)
+**Single source of truth: [BUSINESS.md](BUSINESS.md)** — core principles, lifecycle phases, current phase, and the document map. On any business-model conflict between docs, BUSINESS.md wins. Key principle to never violate in code: ad consent is **per-moment in chat** (assistant asks each time) — no toggles, no ad-settings page; `profiles.ad_preferences` is deprecated.
+
 **Free to users. Revenue from consent-based conversational advertising.**
 - The data contract is transparent and front-and-center at onboarding: the interview builds a personal profile, that profile powers tailored offers, the user controls what they see and when
 - When the vault detects a relevant intent (e.g. user wants a shirt), the interviewer offers to surface current deals — user says yes or no, nothing is forced
@@ -19,7 +21,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 
 ## Stack
 - **Web**: Next.js 16 + TypeScript + Tailwind CSS (apps/web)
-- **Mobile**: React Native + Expo — not started yet (apps/mobile)
+- **Mobile**: React Native + Expo (SDK 57) — core loop built + verified on-device (session 20); `apps/mobile`, shares `packages/shared` with web
 - **Database**: Supabase (Postgres + Auth) — project ref: aykjvvtolkaqvijfeewn
 - **AI**: Groq (Llama 3.3 70B) — chat interviewer, free tier. Anthropic Sonnet — planned for extraction synthesis
 - **Graph**: D3 force simulation (custom, no react-force-graph)
@@ -89,7 +91,7 @@ The full session-by-session build log lives in **[CHANGELOG.md](CHANGELOG.md)** 
 2. Vercel deployment — **pre-deploy blocker**: wire the "Delete account" row (currently a disabled placeholder in UserMenu) to real GDPR deletion + add privacy/legal copy. User menu itself is built (session 19: Profile+Gender, Graph settings, Manage nodes, Export, Logout).
 3. Affiliate link integration — Amazon Associates, Ticketmaster, Booking.com (Day 1 ad revenue, no advertiser deals needed)
 4. Ad moment UI — sponsored offer card inside ChatPanel, clearly labeled, triggered only after user says yes
-5. Mobile app (Expo) — only after web is live and validated
+5. Mobile app (Expo) — core loop built + verified on a physical Android device (session 20: login → live Skia graph → chat → nodes grow). **Next: polish punch list** (owner has a "points to improve" list, captured next session), then Phase 8 standalone preview APK (needs `EXPO_PUBLIC_*` as EAS env + a deployed web URL). Full build log + resume marker: `docs/mobile/2026-07-06-mobile-app-plan.md`.
 
 ## Common commands
 ```bash

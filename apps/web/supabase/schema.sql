@@ -160,7 +160,8 @@ CREATE INDEX IF NOT EXISTS idx_vault_notes_scheduled
   ON public.vault_notes(user_id, scheduled_for) WHERE scheduled_for IS NOT NULL;
 
 -- Phase 4 — advertiser data layer
--- Per-category ad consent: { "fashion": true, "electronics": false, ... }
+-- DEPRECATED (2026-07-05, unused — see BUSINESS.md principle 2): consent is per-moment in chat,
+-- never a stored per-category toggle. Nothing reads/writes this column; drop in a future migration.
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS ad_preferences JSONB DEFAULT '{}'::jsonb;
 -- Ground-layer demographics for ad targeting: { "age": 28, "home_location": "Rzeszow" }.
 -- Occupation lives as an `org` vault_note, not here. Filled gradually via lull nudges.

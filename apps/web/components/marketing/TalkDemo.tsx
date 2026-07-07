@@ -29,18 +29,28 @@ export default function TalkDemo() {
     const el = ref.current
     if (!el) return
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    let timers: ReturnType<typeof setTimeout>[] = []
     const io = new IntersectionObserver(
       ([e]) => {
         if (!e.isIntersecting) return
         io.disconnect()
         if (reduce) return setStep(CHAT.length)
         // Reveal one chat line at a time; nodes appear as their answer lands.
-        CHAT.forEach((_, i) => setTimeout(() => setStep(i), 400 + i * 900))
+        // Then hold, reset, and replay — the scene stays alive instead of going static.
+        const play = () => {
+          timers = CHAT.map((_, i) => setTimeout(() => setStep(i), 400 + i * 1000))
+          timers.push(setTimeout(() => setStep(-1), 400 + CHAT.length * 1000 + 3200))
+          timers.push(setTimeout(play, 400 + CHAT.length * 1000 + 3900))
+        }
+        play()
       },
       { threshold: 0.3 },
     )
     io.observe(el)
-    return () => io.disconnect()
+    return () => {
+      io.disconnect()
+      timers.forEach(clearTimeout)
+    }
   }, [])
 
   const nodeVisible = (at: number) => step >= at
@@ -56,10 +66,10 @@ export default function TalkDemo() {
             style={{ opacity: step >= i ? 1 : 0, transform: step >= i ? "none" : "translateY(10px)" }}
           >
             <div
-              className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm ${
+              className={`max-w-[80%] rounded-2xl px-5 py-3 text-[15px] ${
                 m.who === "you"
-                  ? "bg-[#60a5fa] text-black"
-                  : "border border-white/10 bg-white/[0.04] text-white/85"
+                  ? "bg-[#60a5fa] text-black shadow-[0_0_30px_-10px_rgba(96,165,250,0.8)]"
+                  : "border border-white/10 bg-white/[0.05] text-white/85 light:border-black/10 light:bg-black/[0.04] light:text-black/80"
               }`}
             >
               {m.text}
@@ -75,12 +85,12 @@ export default function TalkDemo() {
             <line
               key={n.id}
               x1={CENTER.x} y1={CENTER.y} x2={n.x} y2={n.y}
-              stroke="#ffffff33" strokeWidth={0.4}
-              style={{ opacity: nodeVisible(n.at) ? 1 : 0, transition: "opacity 0.6s" }}
+              strokeWidth={0.4}
+              style={{ stroke: "var(--g-link-self)", opacity: nodeVisible(n.at) ? 1 : 0, transition: "opacity 0.6s" }}
             />
           ))}
-          <circle cx={CENTER.x} cy={CENTER.y} r={4.5} fill="#ffffff" />
-          <text x={CENTER.x} y={CENTER.y + 9} textAnchor="middle" fontSize="4" fill="#ffffffcc" style={{ fontFamily: "var(--font-body)" }}>You</text>
+          <circle cx={CENTER.x} cy={CENTER.y} r={4.5} style={{ fill: "var(--g-you)" }} />
+          <text x={CENTER.x} y={CENTER.y + 9} textAnchor="middle" fontSize="4" style={{ fontFamily: "var(--font-body)", fill: "var(--g-label-hub)" }}>You</text>
           {NODES.map((n) => (
             <g
               key={n.id}
@@ -91,9 +101,9 @@ export default function TalkDemo() {
                 transition: "opacity 0.5s, transform 0.6s cubic-bezier(0.34,1.56,0.64,1)",
               }}
             >
-              <circle cx={n.x} cy={n.y} r={7} fill={n.color} opacity={0.14} />
-              <circle cx={n.x} cy={n.y} r={3} fill={n.color} />
-              <text x={n.x} y={n.y + 8} textAnchor="middle" fontSize="3.4" fill="#ffffffcc" style={{ fontFamily: "var(--font-body)" }}>
+              <circle cx={n.x} cy={n.y} r={8} fill={n.color} opacity={0.22} />
+              <circle cx={n.x} cy={n.y} r={3.4} fill={n.color} />
+              <text x={n.x} y={n.y + 8} textAnchor="middle" fontSize="3.4" style={{ fontFamily: "var(--font-body)", fill: "var(--g-label-hub)" }}>
                 {n.label}
               </text>
             </g>

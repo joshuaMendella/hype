@@ -2,97 +2,99 @@
 
 import { useState } from "react"
 
-// The signature moment: consent-only ads, demonstrated. An offer card exists ONLY while a
-// category is toggled on. Flip everything off and the space says so — nothing shows unless
-// you asked for it. This is a mock (no backend); it argues the product's core promise by
-// letting you feel it.
+// The signature moment, shown the way it actually works in the product: there is no ad
+// settings page. The interviewer notices real intent in conversation, ASKS, and the offer
+// exists only if you say yes — say no and the chat just moves on. Interactive mock of that
+// exact flow (see HYPE_BUSINESS_ASSESSMENT.md, "anatomy of an ad moment").
 
-type Category = "Style" | "Travel" | "Finance"
-
-const OFFERS: Record<Category, { title: string; detail: string; from: string }> = {
-  Style: { title: "Nike Pegasus 41", detail: "The running shoe you mentioned — 20% off this week", from: "Nike" },
-  Travel: { title: "Lisbon → Porto by rail", detail: "The trip you're planning — fares from €12", from: "Omio" },
-  Finance: { title: "Index fund, 0% fees", detail: "For the investing you started reading about", from: "Trading 212" },
-}
-
-const KNOWS = ["Runs most mornings", "Trip to Lisbon in May", "Learning guitar", "Drinks flat whites"]
+type Answer = "pending" | "yes" | "no"
 
 export default function ConsentPanel() {
-  const [on, setOn] = useState<Record<Category, boolean>>({ Style: true, Travel: true, Finance: false })
-  const active = (Object.keys(on) as Category[]).filter((c) => on[c])
-  const shown = active[0] // one card at a time — the first category you've said yes to
+  const [answer, setAnswer] = useState<Answer>("pending")
 
   return (
-    <div className="grid gap-4 sm:grid-cols-[1fr_1.1fr]">
-      {/* Left: what it knows + the consent switches */}
-      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
-        <p className="text-xs uppercase tracking-[0.2em] text-white/40">Here&apos;s what I know about you</p>
-        <ul className="mt-3 space-y-1.5">
-          {KNOWS.map((k) => (
-            <li key={k} className="flex items-center gap-2 text-sm text-white/70">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#fbbf24]" />
-              {k}
-            </li>
-          ))}
-        </ul>
+    <div className="mx-auto max-w-2xl rounded-3xl border border-white/10 bg-white/[0.02] p-6 light:border-black/10 light:bg-white sm:p-8">
+      <p className="text-xs uppercase tracking-[0.2em] text-white/40 light:text-black/45">A real ad moment</p>
 
-        <p className="mt-6 text-xs uppercase tracking-[0.2em] text-white/40">Show me offers for</p>
-        <div className="mt-3 space-y-2">
-          {(Object.keys(on) as Category[]).map((c) => (
-            <button
-              key={c}
-              role="switch"
-              aria-checked={on[c]}
-              onClick={() => setOn((s) => ({ ...s, [c]: !s[c] }))}
-              className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/[0.02] px-4 py-3 text-left transition-colors hover:border-white/20"
-            >
-              <span className="text-sm text-white/85">{c}</span>
-              <span
-                className={`relative h-6 w-11 rounded-full transition-colors ${
-                  on[c] ? "bg-[#fbbf24]" : "bg-white/15"
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-black transition-all ${
-                    on[c] ? "left-[22px]" : "left-0.5"
-                  }`}
-                />
-              </span>
-            </button>
-          ))}
+      <div className="mt-5 space-y-3">
+        {/* Intent, in the user's own words */}
+        <div className="flex justify-end">
+          <div className="max-w-[85%] rounded-2xl bg-[#60a5fa] px-5 py-3 text-[15px] text-black">
+            Ugh — my running shoes are completely falling apart.
+          </div>
         </div>
-      </div>
 
-      {/* Right: the offer — present only with consent */}
-      <div className="flex flex-col rounded-2xl border border-white/10 bg-gradient-to-b from-[#fbbf24]/[0.08] to-transparent p-6">
-        <p className="text-xs uppercase tracking-[0.2em] text-white/40">What you&apos;ll see</p>
-        {shown ? (
-          <div className="mt-4 flex flex-1 flex-col justify-center">
-            <div className="rounded-2xl border border-[#fbbf24]/30 bg-black/40 p-5 shadow-[0_0_40px_-12px_rgba(251,191,36,0.5)]">
+        {/* Hype asks. It never just shows. */}
+        <div className="flex justify-start">
+          <div className="max-w-[85%] rounded-2xl border border-white/10 bg-white/[0.05] px-5 py-3 text-[15px] text-white/85 light:border-black/10 light:bg-black/[0.04] light:text-black/80">
+            Sounds like it&apos;s time. I know your size and the brands you like — want me to
+            pull up a couple of current deals?
+          </div>
+        </div>
+
+        {answer === "pending" && (
+          <div className="offer-in flex justify-end gap-2 pt-1">
+            <button
+              onClick={() => setAnswer("yes")}
+              className="rounded-xl bg-[#fbbf24] px-5 py-2.5 text-sm font-semibold text-black transition-transform hover:scale-[1.03]"
+            >
+              Yes, show me
+            </button>
+            <button
+              onClick={() => setAnswer("no")}
+              className="rounded-xl border border-white/15 px-5 py-2.5 text-sm text-white/70 transition-colors hover:border-white/30 hover:text-white light:border-black/20 light:text-black/60 light:hover:border-black/40 light:hover:text-black"
+            >
+              Not now
+            </button>
+          </div>
+        )}
+
+        {answer === "yes" && (
+          <div className="offer-in">
+            <div className="rounded-2xl border border-[#fbbf24]/30 bg-black/40 p-5 shadow-[0_0_40px_-12px_rgba(251,191,36,0.5)] light:border-[#b45309]/30 light:bg-[#fbbf24]/[0.08]">
               <div className="mb-3 flex items-center justify-between">
-                <span className="rounded-md bg-[#fbbf24]/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[#fbbf24]">
+                <span className="rounded-md bg-[#fbbf24]/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[#fbbf24] light:bg-[#fbbf24]/25 light:text-[#b45309]">
                   Sponsored · you said yes
                 </span>
-                <span className="text-xs text-white/40">{OFFERS[shown].from}</span>
+                <span className="text-xs text-white/40 light:text-black/45">Nike</span>
               </div>
-              <p className="font-display text-lg font-semibold text-white">{OFFERS[shown].title}</p>
-              <p className="mt-1 text-sm text-white/60">{OFFERS[shown].detail}</p>
+              <p className="font-display text-lg font-semibold text-white light:text-[#141414]">Nike Pegasus 41</p>
+              <p className="mt-1 text-sm text-white/60 light:text-black/60">
+                Your size, the model you mentioned — 20% off this week
+              </p>
               <div className="mt-4 flex gap-2">
-                <span className="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-black">See it</span>
-                <span className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-white/70">No thanks</span>
+                <span className="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-black light:bg-[#141414] light:text-white">See it</span>
+                <span className="rounded-lg border border-white/15 px-3 py-1.5 text-xs text-white/70 light:border-black/20 light:text-black/60">No thanks</span>
               </div>
             </div>
+            <p className="mt-3 text-center text-xs text-white/40 light:text-black/45">
+              One offer, clearly labeled, because you asked. That&apos;s the whole model.
+            </p>
           </div>
-        ) : (
-          <div className="mt-4 flex flex-1 flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 py-12 text-center">
-            <p className="text-sm text-white/70">Nothing.</p>
-            <p className="mt-1 max-w-[16rem] text-xs text-white/40">
-              That&apos;s the point — turn every switch off and you see no offers at all. Nothing
-              shows unless you asked for it.
+        )}
+
+        {answer === "no" && (
+          <div className="offer-in space-y-3">
+            <div className="flex justify-start">
+              <div className="max-w-[85%] rounded-2xl border border-white/10 bg-white/[0.05] px-5 py-3 text-[15px] text-white/85 light:border-black/10 light:bg-black/[0.04] light:text-black/80">
+                No problem. So — how did Saturday&apos;s long run go?
+              </div>
+            </div>
+            <p className="text-center text-xs text-white/40 light:text-black/45">
+              No ad. The conversation just carries on, and it won&apos;t ask twice.
             </p>
           </div>
         )}
       </div>
+
+      {answer !== "pending" && (
+        <button
+          onClick={() => setAnswer("pending")}
+          className="mt-5 w-full text-center text-xs text-white/40 light:text-black/45 transition-colors hover:text-white/70 light:hover:text-black/70"
+        >
+          ↺ Try the other answer
+        </button>
+      )}
     </div>
   )
 }

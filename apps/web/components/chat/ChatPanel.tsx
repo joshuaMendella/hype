@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback } from "react"
+import AdCardView, { type AdCard } from "./AdCard"
 
 interface ChatMessage {
   role: "user" | "assistant"
@@ -45,6 +46,7 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
 
   const [history, setHistory] = useState<ChatMessage[]>(seedHistory)
   const [currentAi, setCurrentAi] = useState(seedAi)
+  const [card, setCard] = useState<AdCard | null>(null)
   const [aiVisible, setAiVisible] = useState(seeded)
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(!seeded)
@@ -82,6 +84,7 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
     setInput("")
     setLoading(true)
     setAiVisible(false)
+    setCard(null)
 
     const next: ChatMessage[] = [
       ...history,
@@ -103,8 +106,9 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
           : "Something slipped on my end — want to try that again?")
         return
       }
-      const { reply } = await res.json()
+      const { reply, card: newCard } = await res.json()
       setCurrentAi(reply)
+      setCard(newCard ?? null)
       onReply?.()
     } catch {
       // network failure / bad JSON — surface it instead of an unhandled rejection + silent stall
@@ -172,8 +176,14 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
         </p>
       </div>
 
-      {/* ── Graph shows through here ──────────────────────────────────── */}
-      <div className="flex-1" />
+      {/* ── Graph shows through here / ad card sits mid-screen ─────────── */}
+      <div className="flex-1 flex items-center justify-center">
+        {card && (
+          <div className="pointer-events-auto">
+            <AdCardView card={card} />
+          </div>
+        )}
+      </div>
 
       {/* ── User input — bottom center ────────────────────────────────── */}
       <div
