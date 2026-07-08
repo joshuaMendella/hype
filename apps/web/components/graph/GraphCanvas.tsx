@@ -34,31 +34,155 @@ interface Props {
   settings?: GraphSettings
 }
 
+// Links — a knowledge graph's appeal IS its connectedness, so keep edges readable.
+// self (You→root): soft white spine; brand: purple; relation (entity→entity): stronger neutral.
+const linkStyle: Record<string, { stroke: string; width: number }> = {
+  self:       { stroke: "#ffffff33", width: 1.25 },
+  brand:      { stroke: "#a78bfa45", width: 1.25 },
+  relation:   { stroke: "#ffffff4d", width: 1.25 },
+  located_in: { stroke: "#67e8f955", width: 1.25 },
+}
+
 export default function GraphCanvas({ initialData, refreshTrigger, settings = DEFAULT_SETTINGS }: Props) {
   const palette = settings.palette
   const svgRef = useRef<SVGSVGElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
   const zoomTransformRef = useRef<d3.ZoomTransform | null>(null)
-  // Persist node positions between redraws so existing nodes don't jump
+  // Persist node positions between renders so existing nodes don't jump
   const positionsRef = useRef<Record<string, { x: number; y: number }>>({})
   // Track which node IDs we've already drawn, so genuinely new nodes can animate in
   const seenNodeIdsRef = useRef<Set<string>>(new Set())
   const [graphData, setGraphData] = useState<GraphData>(initialData)
 
-  const draw = useCallback(() => {
+  // Persistent D3 machinery — created once on mount, reused across renders
+  const gRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null)
+  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null)
+  const linksGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null)
+  const nodesGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null)
+  const simulationRef = useRef<d3.Simulation<GraphNode, GraphLink> | null>(null)
+  // id → persistent node object, reused across renders so x/y/vx/vy carry over
+  const nodeObjectsRef = useRef<Map<string, GraphNode>>(new Map())
+  const degreeMapRef = useRef<Record<string, number>>({})
+  // Current joined selections — read (and refreshed) each render, applied on every tick
+  const linkSelRef = useRef<d3.Selection<SVGLineElement, GraphLink, SVGGElement, unknown> | null>(null)
+  const nodeSelRef = useRef<d3.Selection<SVGGElement, GraphNode, SVGGElement, unknown> | null>(null)
+
+  // Init once: container, zoom behavior, link/node groups, and ONE persistent simulation.
+  useEffect(() => {
     const svg = d3.select(svgRef.current!)
-    const savedTransform = zoomTransformRef.current
+    // Defensive: guards against duplicate <g> if this effect ever double-fires (e.g. dev Strict Mode).
     svg.selectAll("*").remove()
 
     const width = svgRef.current!.clientWidth
     const height = svgRef.current!.clientHeight
 
-    // Restore saved positions so existing nodes don't teleport on redraw
-    const nodes: GraphNode[] = graphData.nodes.map((n) => ({
-      ...n,
-      x: positionsRef.current[n.id]?.x,
-      y: positionsRef.current[n.id]?.y,
-    }))
+    const g = svg.append("g")
+    gRef.current = g
+
+    const zoom = d3.zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.1, 6])
+      .on("zoom", (event) => {
+        zoomTransformRef.current = event.transform
+        g.attr("transform", event.transform)
+      })
+    svg.call(zoom)
+    zoomRef.current = zoom
+
+    linksGroupRef.current = g.append("g")
+    nodesGroupRef.current = g.append("g")
+
+    const simulation = d3.forceSimulation<GraphNode>([])
+      .force("link", d3.forceLink<GraphNode, GraphLink>([]).id((d) => d.id).distance(80).strength(0.5))
+      .force("charge", d3.forceManyBody().strength(-280))
+      .force("center", d3.forceCenter(width / 2, height / 2))
+      .force("collision", d3.forceCollide<GraphNode>().radius((d) => nodeRadius(degreeMapRef.current[d.id] ?? 0) + 10))
+
+    simulation.on("tick", () => {
+      // Save positions so they survive the next render
+      nodeObjectsRef.current.forEach((n, id) => {
+        if (n.x != null) positionsRef.current[id] = { x: n.x, y: n.y ?? 0 }
+      })
+
+      linkSelRef.current
+        ?.attr("x1", (d) => (d.source as GraphNode).x ?? 0)
+        .attr("y1", (d) => (d.source as GraphNode).y ?? 0)
+        .attr("x2", (d) => (d.target as GraphNode).x ?? 0)
+        .attr("y2", (d) => (d.target as GraphNode).y ?? 0)
+
+      nodeSelRef.current?.attr("transform", (d) => `translate(${d.x ?? 0},${d.y ?? 0})`)
+    })
+
+    // Auto-fit only on first load. zoomTransformRef stays null until either the user
+    // pans/zooms or this very auto-fit runs (which itself fires the zoom handler and
+    // sets it) — so later "end" events (from subsequent renders reheating) are no-ops.
+    simulation.on("end", () => {
+      if (zoomTransformRef.current) return
+      const node = gRef.current?.node()
+      if (!node) return
+      const bounds = node.getBBox()
+      if (!bounds.width || !bounds.height) return
+      const w = svgRef.current!.clientWidth
+      const h = svgRef.current!.clientHeight
+      const scale = Math.min(0.85 / Math.max(bounds.width / w, bounds.height / h), 1.5)
+      const tx = (w - scale * (bounds.x * 2 + bounds.width)) / 2
+      const ty = (h - scale * (bounds.y * 2 + bounds.height)) / 2
+      svg.transition().duration(600).call(
+        zoom.transform,
+        d3.zoomIdentity.translate(tx, ty).scale(scale)
+      )
+    })
+
+    simulationRef.current = simulation
+
+    // Resize: recenter and gently reheat — no teardown, no rebuild.
+    const observer = new ResizeObserver(() => {
+      if (!svgRef.current) return
+      const w = svgRef.current.clientWidth
+      const h = svgRef.current.clientHeight
+      simulation.force<d3.ForceCenter<GraphNode>>("center")?.x(w / 2).y(h / 2)
+      simulation.alpha(0.3).restart()
+    })
+    observer.observe(svgRef.current!)
+
+    return () => {
+      observer.disconnect()
+      simulation.stop()
+    }
+  }, [])
+
+  const render = useCallback(() => {
+    const g = gRef.current
+    const zoom = zoomRef.current
+    const linksGroup = linksGroupRef.current
+    const nodesGroup = nodesGroupRef.current
+    const simulation = simulationRef.current
+    if (!g || !zoom || !linksGroup || !nodesGroup || !simulation || !svgRef.current) return
+
+    const width = svgRef.current.clientWidth
+    const height = svgRef.current.clientHeight
+
+    // Reuse the same node objects across renders so x/y/vx/vy (and the simulation's grip
+    // on them) survive — only genuinely-new ids get a fresh object. Stale ids are dropped.
+    const nodeObjects = nodeObjectsRef.current
+    const nextIds = new Set(graphData.nodes.map((n) => n.id))
+    for (const id of Array.from(nodeObjects.keys())) {
+      if (!nextIds.has(id)) nodeObjects.delete(id)
+    }
+    const nodes: GraphNode[] = graphData.nodes.map((n) => {
+      const existing = nodeObjects.get(n.id)
+      if (existing) {
+        Object.assign(existing, n)
+        return existing
+      }
+      // Fresh node — seed near the center so it settles in rather than flying in from a corner.
+      const fresh: GraphNode = {
+        ...n,
+        x: positionsRef.current[n.id]?.x ?? width / 2 + (Math.random() - 0.5) * 40,
+        y: positionsRef.current[n.id]?.y ?? height / 2 + (Math.random() - 0.5) * 40,
+      }
+      nodeObjects.set(n.id, fresh)
+      return fresh
+    })
     const links: GraphLink[] = graphData.links.map((l) => ({ ...l }))
 
     // Connect "You" to the graph: the home screen should read as a portrait of the self,
@@ -102,12 +226,12 @@ export default function GraphCanvas({ initialData, refreshTrigger, settings = DE
       }
     }
 
-    // New nodes since the last draw — these animate in. Empty set on first load (nothing "new").
+    // New nodes since the last render — these animate in. Empty set on first load (nothing "new").
     const seen = seenNodeIdsRef.current
     const isFirstDraw = seen.size === 0
     const isNew = (id: string) => !isFirstDraw && !seen.has(id)
 
-    // Degree map for node sizing
+    // Degree map for node sizing — also read by the collision force accessor via degreeMapRef.
     const degreeMap: Record<string, number> = {}
     links.forEach((l) => {
       const src = typeof l.source === "string" ? l.source : (l.source as GraphNode).id
@@ -115,178 +239,157 @@ export default function GraphCanvas({ initialData, refreshTrigger, settings = DE
       degreeMap[src] = (degreeMap[src] ?? 0) + 1
       degreeMap[tgt] = (degreeMap[tgt] ?? 0) + 1
     })
+    degreeMapRef.current = degreeMap
 
-    const g = svg.append("g")
-
-    const zoom = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.1, 6])
-      .on("zoom", (event) => {
-        zoomTransformRef.current = event.transform
-        g.attr("transform", event.transform)
-      })
-
-    svg.call(zoom)
-
-    if (savedTransform) {
-      svg.call(zoom.transform, savedTransform)
-    }
-
-    // Low alpha on updates — existing nodes barely move, new node settles in
-    const simulation = d3.forceSimulation<GraphNode>(nodes)
-      .alpha(savedTransform ? 0.3 : 1)
-      .force("link", d3.forceLink<GraphNode, GraphLink>(links)
-        .id((d) => d.id)
-        .distance(80)
-        .strength(0.5)
+    // Links — keyed join so unchanged edges stay put in the DOM (no flash).
+    const link = linksGroup
+      .selectAll<SVGLineElement, GraphLink>("line")
+      .data(links, (d) => d.id)
+      .join(
+        (enter) => {
+          const sel = enter.append("line")
+            .attr("stroke", (d) => (linkStyle[d.link_type ?? "relation"] ?? linkStyle.relation).stroke)
+            .attr("stroke-width", (d) => (linkStyle[d.link_type ?? "relation"] ?? linkStyle.relation).width)
+          // Relationship edges carry a label ("at", "with", …) — surface it on hover via a native
+          // <title> child. (Node tooltips are the rich HTML ones; edges just get the plain label.)
+          sel.filter((d) => (d.link_type === "relation" || d.link_type === "located_in") && !!d.anchor_text)
+            .append("title")
+            .text((d) => d.anchor_text ?? "")
+          return sel
+        },
+        (update) =>
+          update
+            .attr("stroke", (d) => (linkStyle[d.link_type ?? "relation"] ?? linkStyle.relation).stroke)
+            .attr("stroke-width", (d) => (linkStyle[d.link_type ?? "relation"] ?? linkStyle.relation).width),
+        (exit) => exit.remove()
       )
-      .force("charge", d3.forceManyBody().strength(-280))
-      .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collision", d3.forceCollide<GraphNode>()
-        .radius((d) => nodeRadius(degreeMap[d.id] ?? 0) + 10)
+    linkSelRef.current = link
+
+    // Nodes — keyed join; only truly-new nodes get appended (and pop-animated).
+    const node = nodesGroup
+      .selectAll<SVGGElement, GraphNode>("g.node")
+      .data(nodes, (d) => d.id)
+      .join(
+        (enter) => {
+          const sel = enter.append("g")
+            .attr("class", "node")
+            .style("cursor", "pointer")
+            .call(
+              d3.drag<SVGGElement, GraphNode>()
+                .on("start", (event, d) => {
+                  if (!event.active) simulation.alphaTarget(0.3).restart()
+                  d.fx = d.x; d.fy = d.y
+                })
+                .on("drag", (event, d) => { d.fx = event.x; d.fy = event.y })
+                .on("end", (event, d) => {
+                  if (!event.active) simulation.alphaTarget(0)
+                  d.fx = null; d.fy = null
+                })
+            )
+
+          // Outer glow ring
+          const glow = sel.append("circle")
+            .attr("class", "glow")
+            .attr("r", (d) => nodeRadius(degreeMap[d.id] ?? 0) + 5)
+            .attr("fill", (d) => nodeColorFor(d.topic, palette))
+            .attr("opacity", 0.1)
+
+          // Main circle — every node filled and colored by topic (one color axis)
+          const core = sel.append("circle")
+            .attr("class", "core")
+            .attr("r", (d) => (isNew(d.id) ? 0 : nodeRadius(degreeMap[d.id] ?? 0)))
+            .attr("fill", (d) => nodeColorFor(d.topic, palette))
+            .attr("opacity", 0.85)
+
+          // Dramatize node birth: new nodes scale in with an elastic pop + a one-shot glow pulse.
+          core.filter((d) => isNew(d.id))
+            .transition().duration(750).ease(d3.easeElasticOut.amplitude(1).period(0.5))
+            .attr("r", (d) => nodeRadius(degreeMap[d.id] ?? 0))
+          glow.filter((d) => isNew(d.id))
+            .attr("opacity", 0.5)
+            .transition().duration(900).ease(d3.easeCubicOut)
+            .attr("opacity", 0.1)
+
+          sel.append("text")
+            .text((d) => d.title)
+            .attr("dy", (d) => nodeRadius(degreeMap[d.id] ?? 0) + 13)
+            .attr("text-anchor", "middle")
+            .attr("font-size", (d) => (degreeMap[d.id] ?? 0) >= 2 ? "11px" : "10px")
+            .attr("fill", "#ffffffcc")
+            .attr("pointer-events", "none")
+
+          // Hover/drag handlers attached once on enter — never reattached on update.
+          sel
+            .on("mouseenter", (event, d) => {
+              const tooltip = tooltipRef.current
+              if (!tooltip) return
+              const sub = d.entity_type ?? d.topic ?? ""
+              const header = `<div class="font-medium text-white/90">${escHtml(d.title)}${sub ? ` <span class="text-white/40">· ${escHtml(sub)}</span>` : ""}</div>`
+              const rows = (d.attributes ?? [])
+                .map((a) => `<div><span class="text-white/45">${escHtml(a.label)}:</span> ${escHtml(a.value)}</div>`)
+                .join("")
+              tooltip.innerHTML = header + rows
+              tooltip.style.opacity = "1"
+              tooltip.style.left = `${event.pageX + 12}px`
+              tooltip.style.top = `${event.pageY - 8}px`
+              d3.select(event.currentTarget).select("circle:nth-child(2)")
+                .transition().duration(120).attr("opacity", 1)
+            })
+            .on("mousemove", (event) => {
+              const tooltip = tooltipRef.current
+              if (!tooltip) return
+              tooltip.style.left = `${event.pageX + 12}px`
+              tooltip.style.top = `${event.pageY - 8}px`
+            })
+            .on("mouseleave", (event) => {
+              const tooltip = tooltipRef.current
+              if (tooltip) tooltip.style.opacity = "0"
+              d3.select(event.currentTarget).select("circle:nth-child(2)")
+                .transition().duration(120).attr("opacity", 0.85)
+            })
+
+          return sel
+        },
+        (update) => {
+          // Recompute radius from the current degree map and recolor — handles palette
+          // change and degree change. Never replay the birth pop for existing nodes.
+          update.select<SVGCircleElement>("circle.glow")
+            .attr("r", (d) => nodeRadius(degreeMap[d.id] ?? 0) + 5)
+            .attr("fill", (d) => nodeColorFor(d.topic, palette))
+
+          update.select<SVGCircleElement>("circle.core")
+            .attr("r", (d) => nodeRadius(degreeMap[d.id] ?? 0))
+            .attr("fill", (d) => nodeColorFor(d.topic, palette))
+
+          update.select<SVGTextElement>("text")
+            .text((d) => d.title)
+            .attr("dy", (d) => nodeRadius(degreeMap[d.id] ?? 0) + 13)
+            .attr("font-size", (d) => (degreeMap[d.id] ?? 0) >= 2 ? "11px" : "10px")
+
+          return update
+        },
+        (exit) => exit.remove()
       )
-
-    // Links — a knowledge graph's appeal IS its connectedness, so keep edges readable.
-    // self (You→root): soft white spine; brand: purple; relation (entity→entity): stronger neutral.
-    const linkStyle: Record<string, { stroke: string; width: number }> = {
-      self:       { stroke: "#ffffff33", width: 1.25 },
-      brand:      { stroke: "#a78bfa45", width: 1.25 },
-      relation:   { stroke: "#ffffff4d", width: 1.25 },
-      located_in: { stroke: "#67e8f955", width: 1.25 },
-    }
-    const link = g.append("g")
-      .selectAll("line")
-      .data(links)
-      .join("line")
-      .attr("stroke", (d) => (linkStyle[d.link_type ?? "relation"] ?? linkStyle.relation).stroke)
-      .attr("stroke-width", (d) => (linkStyle[d.link_type ?? "relation"] ?? linkStyle.relation).width)
-
-    // Relationship edges carry a label ("at", "with", …) — surface it on hover via a native
-    // <title> child. (Node tooltips are the rich HTML ones; edges just get the plain label.)
-    link.filter((d) => (d.link_type === "relation" || d.link_type === "located_in") && !!d.anchor_text)
-      .append("title")
-      .text((d) => d.anchor_text ?? "")
-
-    const node = g.append("g")
-      .selectAll<SVGGElement, GraphNode>("g")
-      .data(nodes)
-      .join("g")
-      .style("cursor", "pointer")
-      .call(
-        d3.drag<SVGGElement, GraphNode>()
-          .on("start", (event, d) => {
-            if (!event.active) simulation.alphaTarget(0.3).restart()
-            d.fx = d.x; d.fy = d.y
-          })
-          .on("drag", (event, d) => { d.fx = event.x; d.fy = event.y })
-          .on("end", (event, d) => {
-            if (!event.active) simulation.alphaTarget(0)
-            d.fx = null; d.fy = null
-          })
-      )
-
-    // Outer glow ring
-    const glow = node.append("circle")
-      .attr("r", (d) => nodeRadius(degreeMap[d.id] ?? 0) + 5)
-      .attr("fill", (d) => nodeColorFor(d.topic, palette))
-      .attr("opacity", 0.1)
-
-    // Main circle — every node filled and colored by topic (one color axis)
-    const core = node.append("circle")
-      .attr("r", (d) => isNew(d.id) ? 0 : nodeRadius(degreeMap[d.id] ?? 0))
-      .attr("fill", (d) => nodeColorFor(d.topic, palette))
-      .attr("opacity", 0.85)
-
-    // Dramatize node birth: new nodes scale in with an elastic pop + a one-shot glow pulse.
-    core.filter((d) => isNew(d.id))
-      .transition().duration(750).ease(d3.easeElasticOut.amplitude(1).period(0.5))
-      .attr("r", (d) => nodeRadius(degreeMap[d.id] ?? 0))
-    glow.filter((d) => isNew(d.id))
-      .attr("opacity", 0.5)
-      .transition().duration(900).ease(d3.easeCubicOut)
-      .attr("opacity", 0.1)
+    nodeSelRef.current = node
 
     // Remember what we've drawn so only truly-new nodes animate next time
     seenNodeIdsRef.current = new Set(nodes.map((n) => n.id))
 
-    node.append("text")
-      .text((d) => d.title)
-      .attr("dy", (d) => nodeRadius(degreeMap[d.id] ?? 0) + 13)
-      .attr("text-anchor", "middle")
-      .attr("font-size", (d) => (degreeMap[d.id] ?? 0) >= 2 ? "11px" : "10px")
-      .attr("fill", "#ffffffcc")
-      .attr("pointer-events", "none")
-
-    node
-      .on("mouseenter", (event, d) => {
-        const tooltip = tooltipRef.current
-        if (!tooltip) return
-        const sub = d.entity_type ?? d.topic ?? ""
-        const header = `<div class="font-medium text-white/90">${escHtml(d.title)}${sub ? ` <span class="text-white/40">· ${escHtml(sub)}</span>` : ""}</div>`
-        const rows = (d.attributes ?? [])
-          .map((a) => `<div><span class="text-white/45">${escHtml(a.label)}:</span> ${escHtml(a.value)}</div>`)
-          .join("")
-        tooltip.innerHTML = header + rows
-        tooltip.style.opacity = "1"
-        tooltip.style.left = `${event.pageX + 12}px`
-        tooltip.style.top = `${event.pageY - 8}px`
-        d3.select(event.currentTarget).select("circle:nth-child(2)")
-          .transition().duration(120).attr("opacity", 1)
-      })
-      .on("mousemove", (event) => {
-        const tooltip = tooltipRef.current
-        if (!tooltip) return
-        tooltip.style.left = `${event.pageX + 12}px`
-        tooltip.style.top = `${event.pageY - 8}px`
-      })
-      .on("mouseleave", (event) => {
-        const tooltip = tooltipRef.current
-        if (tooltip) tooltip.style.opacity = "0"
-        d3.select(event.currentTarget).select("circle:nth-child(2)")
-          .transition().duration(120).attr("opacity", 0.85)
-      })
-
-    simulation.on("tick", () => {
-      // Save positions so they survive the next redraw
-      nodes.forEach((n) => {
-        if (n.x != null) positionsRef.current[n.id] = { x: n.x, y: n.y ?? 0 }
-      })
-
-      link
-        .attr("x1", (d) => (d.source as GraphNode).x ?? 0)
-        .attr("y1", (d) => (d.source as GraphNode).y ?? 0)
-        .attr("x2", (d) => (d.target as GraphNode).x ?? 0)
-        .attr("y2", (d) => (d.target as GraphNode).y ?? 0)
-
-      node.attr("transform", (d) => `translate(${d.x ?? 0},${d.y ?? 0})`)
-    })
-
-    // Auto-fit only on first load
-    if (!savedTransform) {
-      simulation.on("end", () => {
-        const bounds = (g.node() as SVGGElement).getBBox()
-        if (!bounds.width || !bounds.height) return
-        const scale = Math.min(0.85 / Math.max(bounds.width / width, bounds.height / height), 1.5)
-        const tx = (width - scale * (bounds.x * 2 + bounds.width)) / 2
-        const ty = (height - scale * (bounds.y * 2 + bounds.height)) / 2
-        svg.transition().duration(600).call(
-          zoom.transform,
-          d3.zoomIdentity.translate(tx, ty).scale(scale)
-        )
-      })
-    }
+    // Feed the persistent simulation the current arrays and reheat.
+    // Low alpha on updates — existing nodes barely move, new nodes settle in.
+    simulation.nodes(nodes)
+    simulation.force<d3.ForceLink<GraphNode, GraphLink>>("link")?.links(links)
+    simulation.alpha(zoomTransformRef.current ? 0.3 : 1).restart()
   }, [graphData, palette])
 
   useEffect(() => {
-    draw()
-    const observer = new ResizeObserver(draw)
-    if (svgRef.current) observer.observe(svgRef.current)
-    return () => observer.disconnect()
-  }, [draw])
+    render()
+  }, [render])
 
   // Refresh graph after each chat reply — triggered by parent via refreshTrigger.
   // Extraction is fire-and-forget (after()), so there's no completion signal to await.
   // ponytail: poll twice instead of one blind wait — covers fast and slow extractions.
-  // The seenNodeIds diff makes the second fetch idempotent (only new nodes animate).
+  // The keyed join makes the second fetch a visual no-op when data is unchanged.
   useEffect(() => {
     if (!refreshTrigger) return
     const supabase = createClient()
