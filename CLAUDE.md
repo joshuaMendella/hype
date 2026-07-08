@@ -23,7 +23,7 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 - **Web**: Next.js 16 + TypeScript + Tailwind CSS (apps/web)
 - **Mobile**: React Native + Expo (SDK 57) — core loop built + verified on-device (session 20); `apps/mobile`, shares `packages/shared` with web
 - **Database**: Supabase (Postgres + Auth) — project ref: aykjvvtolkaqvijfeewn
-- **AI**: Groq (Llama 3.3 70B) — chat interviewer, free tier. Anthropic Sonnet — planned for extraction synthesis
+- **AI**: Gemini 2.5 Flash (chat + extraction, primary) + Cerebras gpt-oss-120b (fallback). No Anthropic key needed.
 - **Graph**: D3 force simulation (custom, no react-force-graph)
 - **Deploy**: Vercel (not yet configured)
 
@@ -50,12 +50,13 @@ The full session-by-session build log lives in **[CHANGELOG.md](CHANGELOG.md)** 
 4. To reset everything for testing: `/hype-reset` (wipes vault, clears agenda, resets onboarding flag)
 5. Root "You" node is always at path `_profile.md`, topic `Profile` — extraction depends on this
 6. `.mcp.json` is gitignored — Supabase MCP needs `SUPABASE_ACCESS_TOKEN` set locally in the file (not committed)
-7. **Extraction graph is verified clean-slate (session 13); session 14 added org type + base-profile + wrap/resurface fixes (all live-test pending).** Open items: (a) **live-test session-14's four fixes** — `/hype-reset` → open with your job, ~10 turns, mention an unnamed place, hit a lull; confirm org node, `base_profile` age/home saved, no early wrap, placeholder circles back, base question only in the lull; (b) narrow the item→place relation (intent items pick up a stray link to the mall, not just the stores); (c) session-12 #5 persona phrasing (confirm-before-ending, warm sign-off) + the farewell→reload→carryover loop remain live-test pending.
-8. **Landing page is built** (session 16) — dark Revolut-style page at `/`, `components/marketing/`, flagship consent-only-ads section. **Immediate focus: visual polish** (user feedback: "good start, room for improvement" — hero legibility with the graph behind the headline, consent-toggle feel, exact "consent-only ads" phrasing), then Vercel deploy. Spec: `docs/superpowers/specs/2026-07-03-landing-page-design.md`.
+7. **Scout digest (in-app welcome-back)** — built + verified, inert until keys. When a user returns after >48h, the opener can lead with one real local find (Ticketmaster city events; Bandsintown artist tours deferred until their API access) targeting `current_location` (fresh, 30-day TTL) else `home_location`. Built as a generalization of the ad-card flow. Needs `SCOUT_TICKETMASTER_KEY` in `.env.local`. Live test pending (owner mid-test with Giessen seeded). Plan: `docs/scout/2026-07-08-scout-digest-plan.md`.
+8. **Extraction live-test open items:** narrow the item→place relation (intent items pick up a stray link to the mall, not just the stores); persona confirm-before-ending + farewell→reload→carryover loop.
+9. **Landing page** built (`components/marketing/`, dark Revolut-style, consent-only-ads section); needs a visual-polish pass (hero legibility, consent-toggle feel, copy) then Vercel deploy. Spec: `docs/superpowers/specs/2026-07-03-landing-page-design.md`.
 
 ## Key extraction rules (updated session 9)
 - Entity-centric graph: entity-type hub → Brand hub → Item (vault paths: `item/zara/belt.md`, `place/monmouth-coffee.md`)
-- 7 entity types: item, brand, place, person, event, org (employer/school/team, session 14), interest (subject/hobby/field followed, session 15 — tier1 empty, complete on naming) — each has tier 1/2/3 parameter stacks in entityTypes.ts. A skill/field the user knows is an interest or dropped, NOT an org. User self-facts (age, home_location) are NOT entities — they route to profiles.base_profile JSONB.
+- 7 entity types: item, brand, place, person, event, org (employer/school/team, session 14), interest (subject/hobby/field followed, session 15 — tier1 empty, complete on naming) — each has tier 1/2/3 parameter stacks in entityTypes.ts. A skill/field the user knows is an interest or dropped, NOT an org. User self-facts (age, home_location, current_location) are NOT entities — they route to profiles.base_profile JSONB. current_location (where they are now, "I'm in X"/"moved to X") is distinct from home_location (hometown) and carries a current_location_at timestamp; scout prefers it while fresh.
 - Vault write triggers on tier1_complete (brand + category for items, name + location + frequency for places, etc.) — NOT on all-attrs-filled
 - Gravity agenda: each pending AgendaItem carries a weight (increments each turn; doubles if tier 1 unfilled); flushes at weight≥10 with incomplete: true frontmatter — soft decay replaces old 5-turn hard cutoff
 - Inferred attributes allowed with `inferred: true` flag + source_utterance ("I go there every Sunday" → Frequency: weekly, inferred)
@@ -89,9 +90,10 @@ The full session-by-session build log lives in **[CHANGELOG.md](CHANGELOG.md)** 
 ## What's NOT done yet (next steps in order)
 1. Landing page **polish** — page is built (session 16, `components/marketing/`); needs a visual pass (hero legibility, consent-toggle feel, copy) per user feedback
 2. Vercel deployment — **pre-deploy blocker**: wire the "Delete account" row (currently a disabled placeholder in UserMenu) to real GDPR deletion + add privacy/legal copy. User menu itself is built (session 19: Profile+Gender, Graph settings, Manage nodes, Export, Logout).
-3. Affiliate link integration — Amazon Associates, Ticketmaster, Booking.com (Day 1 ad revenue, no advertiser deals needed)
-4. Ad moment UI — sponsored offer card inside ChatPanel, clearly labeled, triggered only after user says yes
-5. Mobile app (Expo) — core loop built + verified on a physical Android device (session 20: login → live Skia graph → chat → nodes grow). **Next: polish punch list** (owner has a "points to improve" list, captured next session), then Phase 8 standalone preview APK (needs `EXPO_PUBLIC_*` as EAS env + a deployed web URL). Full build log + resume marker: `docs/mobile/2026-07-06-mobile-app-plan.md`.
+3. Scout digest — v1 built (see checklist #7); add Bandsintown when API access lands, interest APIs (TMDB/RAWG/etc.) later
+4. Affiliate link integration — Amazon Associates, Ticketmaster, Booking.com (Day 1 ad revenue, no advertiser deals needed)
+5. Ad moment UI — the offer card is built and generalized (`AdCard` = `kind: "ad" | "scout"`); still need real sponsor sourcing + the yes-gated ad path wired
+6. Mobile app (Expo) — core loop built + verified on a physical Android device (session 20: login → live Skia graph → chat → nodes grow). **Next: polish punch list** (owner has a "points to improve" list, captured next session), then Phase 8 standalone preview APK (needs `EXPO_PUBLIC_*` as EAS env + a deployed web URL). Full build log + resume marker: `docs/mobile/2026-07-06-mobile-app-plan.md`.
 
 ## Common commands
 ```bash
@@ -119,6 +121,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
 GEMINI_API_KEY=...        ← chat + extraction primary (Gemini 2.5 Flash)
 CEREBRAS_API_KEY=...       ← fallback for both (gpt-oss-120b) if Gemini fails/rate-limits
+SCOUT_TICKETMASTER_KEY=... ← scout digest city events (server-only, no NEXT_PUBLIC_); absent = scout silently off
+SCOUT_BANDSINTOWN_APP_ID=...← scout artist tours (server-only); deferred until Bandsintown API access
 ANTHROPIC_API_KEY=...     ← optional; only if extraction (lib/ai/synthesize.ts) is swapped from Cerebras to Anthropic Sonnet. Not required.
 ```
 
@@ -138,21 +142,24 @@ apps/web/
 │   │   └── GraphWrapper.tsx        ← client wrapper: shares refreshTrigger + graph settings across canvas/chat/menu
 │   ├── marketing/                  ← landing page (Landing, DemoGraph, ConsentPanel, TalkDemo, GrowthTimeline, Nav, Reveal, graphData)
 │   ├── menu/UserMenu.tsx           ← avatar chip → slide-over drawer: Profile, Graph settings, Manage nodes, Export, Logout
-│   └── chat/ChatPanel.tsx          ← AI chat overlay (onReply callback)
+│   └── chat/
+│       ├── ChatPanel.tsx           ← AI chat overlay (onReply callback)
+│       └── AdCard.tsx              ← offer card, kind: "ad" | "scout" (scout = "Local find")
 ├── lib/
 │   ├── supabase/client.ts          ← browser client
 │   ├── supabase/server.ts          ← SSR client
 │   ├── supabase/admin.ts           ← service role (server-only)
 │   ├── graph/palettes.ts           ← node-color source of truth: topic map + 4 palette modes + backgrounds + localStorage settings
+│   ├── scout/                      ← scout digest: sources.ts (Ticketmaster/Bandsintown), getScoutFind.ts (48h gate + city cache, admin-only)
 │   └── ai/
 │       ├── synthesize.ts           ← Cerebras gpt-oss-120b extraction pass (strict json_schema) — feeds extractFacts; runs async off the chat turn; model swappable in one fetch block
 │       ├── extract.ts              ← extractFacts: agenda gravity + vault writes (now fed by synthesize.ts, no longer LLM-coupled)
-│       ├── entityTypes.ts          ← 5 entity types with tier 1/2/3 parameter stacks (source of truth for extraction)
+│       ├── entityTypes.ts          ← 7 entity types with tier 1/2/3 parameter stacks (source of truth for extraction)
 │       ├── checklists.ts           ← AgendaItem/Agenda types, CHECKLIST_PROMPT (tiered)
 │       ├── topics.ts               ← 31 topics (used for tags + graph display, not extraction classification)
 │       └── categories.ts           ← topic → subcategories map (kept, not used in routing)
 ├── types/database.ts               ← all TypeScript types
-└── supabase/schema.sql             ← full DB schema
+└── supabase/schema.sql             ← full DB schema (incl. scout_cache: RLS-enabled, no policies = admin-client-only)
 ```
 
 ## Owner
