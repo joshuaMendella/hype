@@ -199,3 +199,21 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE TRIGGER conversations_updated_at
   BEFORE UPDATE ON public.conversations
   FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+
+-- Scout Digest v1 (2026-07-08) — city-level cache for free-tier event/tour lookups
+-- (Ticketmaster/Bandsintown), so cost scales with distinct cities/day, not users.
+-- NOT user-scoped: read/written only server-side via the admin client
+-- (lib/scout/getScoutFind.ts). RLS is ENABLED with NO policies — a public-schema
+-- table with RLS *off* would be exposed to the anon role via PostgREST; enabling
+-- it with no policy locks out anon/authenticated while service_role (admin client)
+-- bypasses RLS. This is the correct "server-only table" pattern for Supabase.
+CREATE TABLE IF NOT EXISTS public.scout_cache (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  cache_key   TEXT NOT NULL,          -- e.g. "events:rzeszow:2026-07-08" or "artist:radiohead"
+  payload     JSONB NOT NULL,         -- normalized find records (id,title,date,venue,url,source)
+  fetched_at  TIMESTAMPTZ DEFAULT NOW(),
+  expires_at  TIMESTAMPTZ NOT NULL,
+  UNIQUE(cache_key)
+);
+ALTER TABLE public.scout_cache ENABLE ROW LEVEL SECURITY;
+-- No policies by design: only the service-role admin client (BYPASSRLS) may touch it.

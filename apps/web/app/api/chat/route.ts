@@ -4,6 +4,7 @@ import { extractFacts, closeSession } from "@/lib/ai/extract"
 import { synthesize, isPlaceholderName } from "@/lib/ai/synthesize"
 import { CHECKLIST_PROMPT, type Agenda } from "@/lib/ai/checklists"
 import { getTier1Missing, type EntityType } from "@/lib/ai/entityTypes"
+import { getScoutFind } from "@/lib/scout/getScoutFind"
 
 // Chat interviewer: Gemini 2.5 Flash primary (model-shootout winner — honors the
 // persona's transition / one-question / memory rules that gpt-oss-120b dropped);
@@ -22,11 +23,12 @@ type ChatMsg = { role: "user" | "assistant"; content: string }
 // [show-ad] marker in the user's turn opens the flow, and the exact text of
 // the last assistant turn tells us whether we're mid-flow. See isAdFlowMessage
 // and the short-circuit block in POST below.
-type AdCard = { sponsor: string; name: string; price: string; image: string; url: string }
+import type { AdCard } from "@/components/chat/AdCard"
 // Draft ad product. Image is self-hosted in /public (real Zara product shot the
 // owner saved) so it always loads. url points at Zara's men's shirts category —
 // stable, won't 404. Swap for a real affiliate deep-link when monetized.
 const ZARA_AD: AdCard = {
+  kind: "ad",
   sponsor: "Zara",
   name: "Striped Textured Shirt",
   price: "$49.90",
@@ -318,6 +320,7 @@ export async function POST(req: NextRequest) {
 
   const today = new Date().toISOString().split("T")[0]
   const TWO_HOURS_MS = 2 * 60 * 60 * 1000
+  const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000
   const isOpeningMessage = messages.length === 0
 
   // Fetch conversation first (needed for agenda)
@@ -482,6 +485,27 @@ export async function POST(req: NextRequest) {
     ? `## Quiet moment — one gentle profile question is welcome\nThere's nothing active to dig into right now, and you still don't know: ${missingBaseSlots[0]}. If it feels natural, you may ask permission first ("mind if I ask something about you?") and then ask this ONE thing lightly. Only if the moment is calm — never force it, never stack it onto another question, and drop it instantly if they'd rather not say.`
     : ""
 
+  // ── Scout Digest (welcome-back opener only) ───────────────────────────────
+  // Fires only when this is the opener (messages.length===0) AND the gap since the
+  // last conversation exceeds 48h — never mid-conversation. getScoutFind owns the
+  // scout_cache lookup + a >48h re-show dedupe guard; a miss/timeout/error resolves
+  // to null and the opener behaves exactly as it does today.
+  const isWelcomeBack = isOpeningMessage && !isOnboarding && !!recent?.updated_at &&
+    Date.now() - new Date(recent.updated_at).getTime() > FORTY_EIGHT_HOURS_MS
+  const scoutFind = isWelcomeBack
+    ? await getScoutFind(
+        user.id,
+        (profile?.base_profile ?? {}) as { home_location?: string; last_scout_shown_at?: string },
+        (vaultNotes ?? []).map((n) => ({ title: n.title, entity_type: n.entity_type }))
+      ).catch((err) => { console.error("[chat] scout failed:", err); return null })
+    : null
+  // Anti-hallucination: the model only writes the conversational wrapper. Every fact
+  // (title/date/venue) is quoted verbatim from the API record; the URL rides only in
+  // the card, never asked to be retyped by the model.
+  const scoutContext = scoutFind
+    ? `\n\n## A local find for your opener (facts are locked — quote exactly, never alter or invent a date/venue):\n- "${scoutFind.title}" — ${scoutFind.date} at ${scoutFind.venue}\nOpen with one short, warm line referencing this find (the full details ride in a card the user will see below your message — no need to repeat the link), then continue into your normal opening question.`
+    : ""
+
   const systemPrompt = isOnboarding
     ? ONBOARDING_PROMPT.replace("[name]", profile?.display_name ?? "there")
     : [
@@ -489,6 +513,7 @@ export async function POST(req: NextRequest) {
         vaultContext ? `## What you already know about this person (already captured — weave it in, never re-ask it):\n${vaultContext}` : "",
         incompleteThreads ? `## Unfinished from last session — pick these up naturally when relevant:\n${incompleteThreads}` : "",
         todayContext,
+        scoutContext,
         sessionContext,
         baseProfileNudge,
         buildAgendaContext(agenda),
@@ -572,5 +597,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ reply })
+  const scoutCard: AdCard | undefined = scoutFind
+    ? { kind: "scout", title: scoutFind.title, date: scoutFind.date, venue: scoutFind.venue, url: scoutFind.url, source: scoutFind.source }
+    : undefined
+
+  return NextResponse.json(scoutCard ? { reply, card: scoutCard } : { reply })
 }
