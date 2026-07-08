@@ -495,7 +495,7 @@ export async function POST(req: NextRequest) {
   const scoutFind = isWelcomeBack
     ? await getScoutFind(
         user.id,
-        (profile?.base_profile ?? {}) as { home_location?: string; last_scout_shown_at?: string },
+        (profile?.base_profile ?? {}) as { home_location?: string; current_location?: string; current_location_at?: string; last_scout_shown_at?: string },
         (vaultNotes ?? []).map((n) => ({ title: n.title, entity_type: n.entity_type }))
       ).catch((err) => { console.error("[chat] scout failed:", err); return null })
     : null

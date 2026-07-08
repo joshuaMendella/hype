@@ -51,7 +51,7 @@ export type RawEntity = {
   relations?: { to: string; label: string }[]
   refines?: string
 }
-export type ExtractionResult = { attributes: Attr[]; entities: RawEntity[]; user_age?: number; user_home_location?: string }
+export type ExtractionResult = { attributes: Attr[]; entities: RawEntity[]; user_age?: number; user_home_location?: string; user_current_location?: string }
 
 const toSlug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
 
@@ -284,11 +284,15 @@ export async function extractFacts(
 
   // User self-facts (age, home location) live on the profile, not the graph. Read-merge-write
   // so a newly-learned age doesn't clobber an existing home_location and vice versa.
-  if (extraction.user_age || extraction.user_home_location) {
+  if (extraction.user_age || extraction.user_home_location || extraction.user_current_location) {
     const { data: prof } = await supabase.from("profiles").select("base_profile").eq("id", userId).single()
     const base = { ...((prof?.base_profile as Record<string, unknown>) ?? {}) }
     if (extraction.user_age) base.age = extraction.user_age
     if (extraction.user_home_location) base.home_location = extraction.user_home_location
+    if (extraction.user_current_location) {
+      base.current_location = extraction.user_current_location
+      base.current_location_at = new Date().toISOString()
+    }
     await supabase.from("profiles").update({ base_profile: base }).eq("id", userId)
   }
 

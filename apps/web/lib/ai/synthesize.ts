@@ -104,8 +104,9 @@ export const SCHEMA = {
     // Facts about the USER themselves (not an entity). 0 / "" when not stated this window.
     user_age: { type: "number", description: "The user's own age if they state it this window, else 0" },
     user_home_location: { type: "string", description: "Where the user lives (home city/country) if stated this window, else \"\"" },
+    user_current_location: { type: "string", description: "The city the user is in/living/staying in RIGHT NOW if they indicate it this window ('I'm in X', 'I'm currently in X', 'I moved to X', 'I'm staying in X', 'here in X'). Distinct from hometown/where they're from. Else \"\"." },
   },
-  required: ["attributes", "entities", "user_age", "user_home_location"],
+  required: ["attributes", "entities", "user_age", "user_home_location", "user_current_location"],
 } as const
 
 export const SYSTEM = `You are an extraction engine for a personal knowledge graph. You read a short slice of a conversation between an interviewer (assistant) and a user, and pull out durable facts about the user. You do NOT talk to the user — you only return structured data.
@@ -135,6 +136,11 @@ The user's own age and where they live describe the person, not a thing in their
 - They state their age ("I'm 28", "just turned 30") → user_age. Otherwise user_age: 0.
 - They state where they live ("I live in Rzeszów", "I'm from Berlin", "my city is X") → user_home_location. Otherwise user_home_location: "".
 Their occupation is different — that IS an entity (an org). Capture a job/employer/school as an org entity as usual.
+
+## home_location vs user_current_location (two different fields — do not conflate)
+- home_location = where they are FROM / their permanent home ("I'm from X", "my hometown is X", "I live in X" stated as a settled fact).
+- user_current_location = where they ARE RIGHT NOW, distinct from home ("I'm in X", "I'm currently in X", "I moved to X recently", "I'm staying in X", "here in X"). Only set this when the phrasing signals present location or a recent move, not a settled home.
+- If the user says only an ambiguous "I live in X" with no signal of a recent move or being elsewhere right now, keep the existing behavior: set home_location and leave user_current_location "".
 
 ## brand — link an item to the store when one is named
 When the user is shopping for, looking at, or bought an item at a named store or brand in the same slice ("pants at H&M", "shoes from Nike"), set that item's brand field to that store/brand. Do NOT leave brand empty when the store is named — the item and its brand belong linked. Only leave brand empty when no store/brand is mentioned for that item.
@@ -234,7 +240,7 @@ type ParsedEntity = {
   refines: string
 }
 
-type RawParsed = { attributes: Attr[]; entities: ParsedEntity[]; user_age?: number; user_home_location?: string }
+type RawParsed = { attributes: Attr[]; entities: ParsedEntity[]; user_age?: number; user_home_location?: string; user_current_location?: string }
 
 // Gemini wants an OpenAPI-subset schema (uppercase types, no additionalProperties).
 function toGeminiSchema(s: any): any {
@@ -350,7 +356,8 @@ export async function synthesize(
   // User self-facts (age/home) route to profiles.base_profile, not to the graph. 0/"" = not stated.
   const user_age = parsed.user_age && parsed.user_age > 0 ? parsed.user_age : undefined
   const user_home_location = parsed.user_home_location?.trim() ? parsed.user_home_location.trim() : undefined
-  return { attributes: (parsed.attributes ?? []).filter(keepAttr), entities, user_age, user_home_location }
+  const user_current_location = parsed.user_current_location?.trim() ? parsed.user_current_location.trim() : undefined
+  return { attributes: (parsed.attributes ?? []).filter(keepAttr), entities, user_age, user_home_location, user_current_location }
 }
 
 // ponytail: one runnable check — `npx tsx lib/ai/synthesize.ts` from apps/web.

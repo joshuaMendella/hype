@@ -9,8 +9,11 @@ import { fetchCityEvents, fetchArtistTours, type ScoutFind } from "./sources"
 // the source APIs in parallel on a cache miss. See docs/scout/2026-07-08-scout-digest-plan.md.
 const GAP_MS = 48 * 60 * 60 * 1000
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
+// A "current location" is only trusted for 30 days — past that it's likely stale
+// (user moved on / trip ended) and we fall back to home_location instead.
+const CURRENT_LOC_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
-type ScoutProfile = { home_location?: string; last_scout_shown_at?: string }
+type ScoutProfile = { home_location?: string; current_location?: string; current_location_at?: string; last_scout_shown_at?: string }
 type ScoutEntity = { title: string; entity_type: string | null }
 
 function citySlug(city: string): string {
@@ -54,7 +57,13 @@ export async function getScoutFind(
 
   const admin = createAdminClient()
   const today = new Date().toISOString().split("T")[0]
-  const city = profile.home_location?.trim()
+  // Prefer current_location while fresh (within TTL) — that's where the user actually
+  // is right now — else fall back to home_location. A stale current_location is never used.
+  const currentFresh =
+    profile.current_location?.trim() &&
+    profile.current_location_at &&
+    Date.now() - new Date(profile.current_location_at).getTime() < CURRENT_LOC_TTL_MS
+  const city = (currentFresh ? profile.current_location : profile.home_location)?.trim()
   const artistNames = entities
     .filter((e) => e.entity_type === "person" || e.entity_type === "interest")
     .map((e) => e.title)
