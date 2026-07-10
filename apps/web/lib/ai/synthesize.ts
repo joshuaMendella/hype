@@ -273,7 +273,7 @@ async function extractGemini(userContent: string): Promise<RawParsed> {
         responseSchema: GEMINI_SCHEMA,
         thinkingConfig: { thinkingBudget: 0 }, // extraction needs no reasoning tokens
         temperature: 0, // deterministic structured extraction
-        maxOutputTokens: 2048,
+        maxOutputTokens: 3000,
       },
     }),
   })

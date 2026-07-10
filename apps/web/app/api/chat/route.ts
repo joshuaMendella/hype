@@ -318,6 +318,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid messages" }, { status: 400 })
   }
 
+  // Reject abusively large payloads — a runaway messages array is a cost/DoS vector.
+  const totalChars = messages.reduce((n, m) => n + (m?.content?.length ?? 0), 0)
+  if (messages.length > 200 || totalChars > 100_000) {
+    return NextResponse.json({ error: "Conversation too large" }, { status: 413 })
+  }
+
   const today = new Date().toISOString().split("T")[0]
   const TWO_HOURS_MS = 2 * 60 * 60 * 1000
   const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000
@@ -357,14 +363,16 @@ export async function POST(req: NextRequest) {
       .insert({ user_id: user.id })
       .select("id")
       .single()
-    conversationId = created!.id
+    if (!created) return NextResponse.json({ error: "Failed to create conversation" }, { status: 500 })
+    conversationId = created.id
   } else {
     const { data: created } = await supabase
       .from("conversations")
       .insert({ user_id: user.id })
       .select("id")
       .single()
-    conversationId = created!.id
+    if (!created) return NextResponse.json({ error: "Failed to create conversation" }, { status: 500 })
+    conversationId = created.id
   }
 
   const [{ data: vaultNotes }, { data: todayEvents }, { data: profile }] = await Promise.all([
@@ -569,7 +577,8 @@ export async function POST(req: NextRequest) {
 
   // Sign-off always contains "Talk soon" (system prompt mandates it); wrap-up *proposals*
   // ("want to pick this up tomorrow?") deliberately don't, so they never close prematurely.
-  const isFarewell = /\btalk soon\b/i.test(reply)
+  const trimmedReply = reply.trim()
+  const isFarewell = /talk soon[.!]?\s*$/i.test(trimmedReply) && trimmedReply.length <= 80
 
   const lastUserMsg = messages.findLast((m) => m.role === "user")
   if (lastUserMsg && conversationId) {
