@@ -31,7 +31,7 @@ const INTENT_MARKERS = [
 // A generic placeholder ("another mall", "the store", "a coffee shop") is not a real
 // Name — dropping it keeps a place's tier-1 Name unmet, so the node stays incomplete and
 // the interviewer circles back for the real name instead of closing on the placeholder.
-const GENERIC_PLACE = "mall|store|shop|place|spot|restaurant|cafe|coffee ?shop|bar|gym|park|market|salon|barber"
+const GENERIC_PLACE = "mall|store|shop|place|spot|restaurant|cafe|coffee ?shop|bar|gym|park|market|salon|barber|pharmacy"
 const PLACEHOLDER_NAME = new RegExp(`^((the|a|an|another|some|that|this|my)\\s+)?(${GENERIC_PLACE})s?$|^(somewhere|someplace)$`, "i")
 // Also used at read time (route.ts) so a node that leaked in with a placeholder title
 // before this filter existed still resurfaces as unfinished instead of orphaning.
@@ -40,6 +40,22 @@ function keepAttr(a: Attr): boolean {
   if (!a.value?.trim()) return false
   if (a.title?.toLowerCase() === "name" && PLACEHOLDER_NAME.test(a.value.trim())) return false
   return true
+}
+
+// Deterministic backstop for the prompt's "title vs time reference" and "passing places"
+// rules above — catches what the LLM misses. Anchored (whole-string) so a bare day-of-week
+// title ("Sunday") is rejected but a real title that merely contains one ("Sunday brunch")
+// survives.
+const TEMPORAL_TITLE = /^(mon(day)?|tue(s(day)?)?|wed(nesday)?|thu(rs(day)?)?|fri(day)?|sat(urday)?|sun(day)?|today|tonight|tomorrow|yesterday|this (morning|afternoon|evening|weekend)|last (night|weekend))$/i
+function isJunkTitle(title: string, entity_type: string): boolean {
+  const t = title.trim()
+  if (TEMPORAL_TITLE.test(t)) return true
+  // PLACEHOLDER_NAME was written to catch generic Name *attributes* ("the mall"); reuse it
+  // here for the entity *title* itself, scoped to place/event where a placeholder noun
+  // ("pharmacy", "the store") is the failure mode — item/brand/person/org/interest titles
+  // don't hit this pattern in practice.
+  if ((entity_type === "place" || entity_type === "event") && PLACEHOLDER_NAME.test(t)) return true
+  return false
 }
 
 const attrSchema = {
@@ -114,14 +130,19 @@ export const SYSTEM = `You are an extraction engine for a personal knowledge gra
 
 ## What counts as durable (extract these)
 - Owned items, preferred brands, frequent places, recurring relationships, scheduled/past events
-- Places and people mentioned in passing (they become threads to revisit later)
+- People mentioned in passing (they become threads to revisit later)
+- A NAMED, RECURRING, or narratively meaningful place mentioned in passing — it has a proper name (Grand Club, Starbucks), or the user goes there regularly, or it's tied to someone/something that matters (a cemetery visited to see a person). These become threads to revisit later.
 - A city revealed via "my city", "I'm from", "I live in" → a place entity, description "home city / current residence"
 
 ## What to skip
 - One-off mentions with no durability ("I had a coffee") unless a frequency makes it routine
+- A generic, unnamed, one-off errand ("went to a pharmacy", "stopped at the store") — it is not named, not recurring, and not narratively meaningful, so it is not a place entity. Compare: "Monmouth Coffee" (named) or "the cemetery where my grandfather is buried" (narratively meaningful) ARE captured.
 - Anything already being tracked (see "Currently tracking" below) — don't re-create it as a new entity
 - A routine visit or trip to a place is NOT a separate event — the place itself captures it. Reserve event for dated occasions (a concert, a wedding, a planned trip), never "went to the mall / visited the shop".
 - Rooms or spots where an item lives or will be used ("living room", "bedroom", "home" for a cooler) are NOT place entities — record that as the item's Location attribute. Only create a place for somewhere the user actually goes.
+- Consumables bought at a store (groceries, medicine, toiletries, small sundries) — do NOT create item entities for the individual things bought. Capture the STORE instead, as a brand or place. "bought pasta and sauce at Aldi" → emit "Aldi" (brand), never "pasta" / "sauce" / "food" items.
+- Transport the user rides to get somewhere (train, plane, bus, taxi) is NEVER an item — it isn't owned, it's how they got there. It belongs to the trip/event it served: if a trip or event entity is present in this window, emit a relation from that trip/event to it (e.g. label "via"); otherwise drop it entirely. Never emit entity_type item for a mode of transport.
+- A bare time reference (a day of week, "today", "tonight", "tomorrow", "yesterday", "this morning") is never a title — a title is always the durable thing being talked about, not when it happened. If the time matters, put it in a When or Frequency attribute on the real entity instead.
 
 ## entity_type — pick exactly one per entity
 - item: a physical thing the user owns or wants
@@ -334,7 +355,9 @@ export async function synthesize(
   }
 
   // Normalize "" → null and apply dual-signal intent validation (model flag AND a forward-looking marker)
-  const entities: RawEntity[] = (parsed.entities ?? []).map((e) => {
+  const entities: RawEntity[] = (parsed.entities ?? [])
+    .filter((e) => !isJunkTitle(e.title, e.entity_type))
+    .map((e) => {
     const hasMarker = INTENT_MARKERS.some((m) => (e.intent_utterance ?? "").toLowerCase().includes(m))
     const intent = e.intent && hasMarker
     return {
@@ -386,5 +409,17 @@ if (process.argv[1] && process.argv[1].endsWith("synthesize.ts")) {
   assert(keepAttr(nameAttr("Galeria Rzeszow")), "keeps real name")
   assert(keepAttr(nameAttr("the Louvre")), "keeps 'the Louvre'")
   assert(keepAttr({ title: "Color", value: "the mall" } as Attr), "placeholder rule is Name-only")
+  // Junk-title backstop: bare temporal tokens and placeholder place/event titles are dropped;
+  // real titles (even ones containing a temporal word, or an item/brand/place noun that looks
+  // generic but isn't in the placeholder list) survive.
+  assert(isJunkTitle("Sunday", "event"), "drops bare 'Sunday' as an event title")
+  assert(isJunkTitle("tomorrow", "event"), "drops bare 'tomorrow'")
+  assert(isJunkTitle("pharmacy", "place"), "drops bare 'pharmacy' as a place title")
+  assert(isJunkTitle("a pharmacy", "place"), "drops 'a pharmacy' as a place title")
+  assert(!isJunkTitle("belt", "item"), "keeps 'belt'")
+  assert(!isJunkTitle("Grand Club", "place"), "keeps 'Grand Club'")
+  assert(!isJunkTitle("Zara", "brand"), "keeps 'Zara'")
+  assert(!isJunkTitle("Frankfurt", "place"), "keeps 'Frankfurt'")
+  assert(!isJunkTitle("Sunday brunch", "event"), "keeps 'Sunday brunch' (not a bare day)")
   console.log("synthesize.ts self-check OK")
 }
