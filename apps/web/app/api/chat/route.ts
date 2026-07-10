@@ -5,6 +5,7 @@ import { synthesize, isPlaceholderName } from "@/lib/ai/synthesize"
 import { CHECKLIST_PROMPT, type Agenda } from "@/lib/ai/checklists"
 import { getTier1Missing, type EntityType } from "@/lib/ai/entityTypes"
 import { getScoutFind } from "@/lib/scout/getScoutFind"
+import { logEvent } from "@/lib/admin/logEvent"
 
 // Chat interviewer: Gemini 2.5 Flash primary (model-shootout winner — honors the
 // persona's transition / one-question / memory rules that gpt-oss-120b dropped);
@@ -505,7 +506,7 @@ export async function POST(req: NextRequest) {
         user.id,
         (profile?.base_profile ?? {}) as { home_location?: string; current_location?: string; current_location_at?: string; last_scout_shown_at?: string },
         (vaultNotes ?? []).map((n) => ({ title: n.title, entity_type: n.entity_type }))
-      ).catch((err) => { console.error("[chat] scout failed:", err); return null })
+      ).catch((err) => { console.error("[chat] scout failed:", err); logEvent("scout_failed", { err: String(err) }, user.id); return null })
     : null
   // Anti-hallucination: the model only writes the conversational wrapper. Every fact
   // (title/date/venue) is quoted verbatim from the API record; the URL rides only in
@@ -546,10 +547,12 @@ export async function POST(req: NextRequest) {
     raw = await geminiChat(systemPrompt, history, isOnboarding ? ONBOARDING_SCHEMA : undefined)
   } catch (gemErr) {
     console.error("[chat] Gemini chat failed, falling back to Cerebras:", gemErr)
+    logEvent("chat_fallback", { err: String(gemErr) }, user.id)
     try {
       raw = await cerebrasChat(systemPrompt, history)
     } catch (cereErr) {
       console.error("[chat] chat failed (both providers):", cereErr)
+      logEvent("chat_failed_both", { err: String(cereErr) }, user.id)
       const isRateLimit = String(gemErr).includes(" 429") || String(cereErr).includes(" 429")
       return NextResponse.json({ error: isRateLimit ? "rate_limit" : "chat_error" }, { status: isRateLimit ? 429 : 502 })
     }

@@ -2,6 +2,7 @@ import { TOPICS } from "./topics"
 import { ENTITY_TYPES } from "./entityTypes"
 import type { Agenda } from "./checklists"
 import type { ExtractionResult, RawEntity, Attr } from "./extract"
+import { logEvent } from "@/lib/admin/logEvent"
 
 // Dedicated extraction pass — runs separately from the chat turn so the
 // conversational model never has to emit JSON. Strict structured outputs
@@ -322,10 +323,12 @@ export async function synthesize(
     parsed = await extractGemini(userContent)
   } catch (gemErr) {
     console.error("[synthesize] Gemini extraction failed, falling back to Cerebras:", gemErr)
+    logEvent("extract_fallback", { err: String(gemErr) })
     try {
       parsed = await extractCerebras(userContent)
     } catch (cereErr) {
       console.error("[synthesize] extraction failed (both providers):", cereErr)
+      logEvent("extract_failed_both", { err: String(cereErr) })
       return empty
     }
   }

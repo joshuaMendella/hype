@@ -217,3 +217,16 @@ CREATE TABLE IF NOT EXISTS public.scout_cache (
 );
 ALTER TABLE public.scout_cache ENABLE ROW LEVEL SECURITY;
 -- No policies by design: only the service-role admin client (BYPASSRLS) may touch it.
+
+-- Admin-only observability events (AI fallback/failure signal, scout health).
+-- RLS ENABLED, NO policies: service-role admin client only (same pattern as scout_cache).
+CREATE TABLE IF NOT EXISTS public.events (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL,
+  detail JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_events_created ON public.events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_events_kind ON public.events(kind, created_at DESC);
