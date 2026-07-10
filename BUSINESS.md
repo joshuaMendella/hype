@@ -59,11 +59,9 @@ Phase transitions are earned by metrics, never by calendar. Detailed week-one ex
 
 ---
 
-## 5. Current state snapshot (2026-07-05)
+## 5. Current state
 
-- **Built:** interviewer + two-pass extraction (Gemini 2.5 Flash, Cerebras fallback), entity-centric graph with 7 entity types, D3 graph home screen, user menu (profile, graph settings, manage nodes, vault export, logout), landing page (polish in progress).
-- **Not built (Phase-0 blockers):** the ad-moment flow (intents are banked but nothing consumes them), privacy policy + real account deletion, Vercel deploy, analytics.
-- **Not started:** affiliate program applications, mobile app, any advertiser-side work (correctly — principle 8).
+Live project state — what's built, blockers, and what's next — lives in the repo `CLAUDE.md` (its session checklist + "What's NOT done yet"). This file owns principles and lifecycle, not day-to-day status. Sessions 1–20 are logged in `CHANGELOG.md`.
 
 ---
 
