@@ -13,6 +13,7 @@ export async function GET() {
   const { data: notes, error } = await supabase
     .from("vault_notes")
     .select("path, content_md")
+    .is("archived_at", null) // gardener-archived nodes are soft-deleted, not part of the exported vault
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   const zip = new JSZip()

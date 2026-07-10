@@ -381,13 +381,15 @@ export async function POST(req: NextRequest) {
       .from("vault_notes")
       .select("title, topic, content_md, entity_type")
       .eq("user_id", user.id)
+      .is("archived_at", null) // don't hand the interviewer a gardener-archived node as live context
       .order("updated_at", { ascending: false })
       .limit(20),
     supabase
       .from("vault_notes")
       .select("title, topic, content_md, entity_type")
       .eq("user_id", user.id)
-      .eq("scheduled_for", today),
+      .eq("scheduled_for", today)
+      .is("archived_at", null),
     supabase
       .from("profiles")
       .select("display_name, onboarded, base_profile")

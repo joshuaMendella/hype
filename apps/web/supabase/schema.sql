@@ -159,6 +159,12 @@ ALTER TABLE public.vault_notes ADD COLUMN IF NOT EXISTS scheduled_for DATE;
 CREATE INDEX IF NOT EXISTS idx_vault_notes_scheduled
   ON public.vault_notes(user_id, scheduled_for) WHERE scheduled_for IS NOT NULL;
 
+-- Gardener (lib/graph/reconcile.ts) soft-delete: merge/drop ops set this instead of a hard
+-- DELETE, so every op is reversible (clear the column to undo). NULL = visible/active. Every
+-- graph-facing read filters .is("archived_at", null); writes that genuinely re-mention an
+-- archived node clear it (self-healing) — see writeEntityToVault in lib/ai/extract.ts.
+ALTER TABLE public.vault_notes ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+
 -- Phase 4 — advertiser data layer
 -- DEPRECATED (2026-07-05, unused — see BUSINESS.md principle 2): consent is per-moment in chat,
 -- never a stored per-category toggle. Nothing reads/writes this column; drop in a future migration.

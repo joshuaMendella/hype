@@ -395,7 +395,7 @@ export default function GraphCanvas({ initialData, refreshTrigger, settings = DE
     const supabase = createClient()
     const fetchGraph = async () => {
       const [{ data: notes }, { data: links }] = await Promise.all([
-        supabase.from("vault_notes").select("id, title, topic, path, content_md, intent, source, entity_type"),
+        supabase.from("vault_notes").select("id, title, topic, path, content_md, intent, source, entity_type").is("archived_at", null),
         supabase.from("vault_links").select("id, source_note_id, target_note_id, anchor_text, link_type"),
       ])
       if (!notes || !links) return

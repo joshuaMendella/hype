@@ -239,7 +239,8 @@ async function writeEntityToVault(
     const { data: entityNote } = await supabase
       .from("vault_notes")
       .upsert(
-        { user_id: userId, path: entityPath, title: displayTitle, topic: primaryTopic, entity_type: item.entity_type, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8 },
+        // ponytail: archived_at: null un-hides a gardener-archived node on a genuine re-mention (self-healing)
+        { user_id: userId, path: entityPath, title: displayTitle, topic: primaryTopic, entity_type: item.entity_type, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8, archived_at: null },
         { onConflict: "user_id,path" }
       )
       .select("id")
@@ -260,7 +261,8 @@ async function writeEntityToVault(
   const { data: entityNote } = await supabase
     .from("vault_notes")
     .upsert(
-      { user_id: userId, path: entityPath, title: displayTitle, topic: primaryTopic, entity_type: item.entity_type, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8 },
+      // ponytail: archived_at: null un-hides a gardener-archived node on a genuine re-mention (self-healing)
+      { user_id: userId, path: entityPath, title: displayTitle, topic: primaryTopic, entity_type: item.entity_type, content_md: fullContent, intent: item.intent, scheduled_for: item.scheduled_for, source: "conversation", confidence: 0.8, archived_at: null },
       { onConflict: "user_id,path" }
     )
     .select("id")
@@ -313,6 +315,7 @@ export async function extractFacts(
     .select("title, topic, content_md, entity_type, intent, path")
     .eq("user_id", userId)
     .eq("source", "conversation")
+    .is("archived_at", null) // archived (gardener-merged/dropped) nodes shouldn't be re-opened by a late mention
   const noteByTitle = new Map<string, ConvNote>()
   for (const n of (vaultNotes ?? []) as ConvNote[]) {
     noteByTitle.set(n.title.toLowerCase(), n)
@@ -396,6 +399,7 @@ export async function extractFacts(
       .select("id, title")
       .eq("user_id", userId)
       .eq("source", "conversation")
+      .is("archived_at", null) // don't resolve a relation onto a node the gardener archived away
     // Resolved against CURRENT titles — pre-rename refs (e.g. "Mall" before "Galeria Rzeszow") silently miss and self-heal when re-emitted with the final title.
     const idByTitle = new Map<string, string>()
     for (const n of allNotes ?? []) idByTitle.set(n.title.toLowerCase(), n.id)

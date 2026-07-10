@@ -11,7 +11,7 @@ export default async function GraphPage() {
   if (!user) redirect("/login")
 
   const [{ data: notes }, { data: links }, { data: profile }] = await Promise.all([
-    supabase.from("vault_notes").select("id, title, topic, path, content_md, intent, source, entity_type"),
+    supabase.from("vault_notes").select("id, title, topic, path, content_md, intent, source, entity_type").is("archived_at", null),
     supabase.from("vault_links").select("id, source_note_id, target_note_id, anchor_text, link_type"),
     supabase.from("profiles").select("display_name, base_profile").eq("id", user.id).single(),
   ])

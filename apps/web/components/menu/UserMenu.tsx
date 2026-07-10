@@ -95,6 +95,7 @@ export default function UserMenu({ userId, initialProfile, onNodeDeleted, settin
       .from("vault_notes")
       .select("id, title, path, entity_type, source, content_md")
       .neq("path", "_profile.md") // hide the root anchor
+      .is("archived_at", null) // gardener-archived (merged/dropped) nodes aren't user-manageable
       .order("created_at", { ascending: false })
       .then(({ data }) => setNodes((data as VaultNode[]) ?? []))
   }, [view, nodes])
