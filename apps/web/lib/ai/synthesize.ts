@@ -94,7 +94,7 @@ export const SCHEMA = {
           intent: { type: "boolean", description: "true ONLY for a forward-looking desire to acquire/do this (want, need, looking for, planning to)" },
           intent_confidence: { type: "number" },
           intent_utterance: { type: "string", description: "exact phrase signalling intent, empty if intent is false" },
-          scheduled_for: { type: "string", description: "ISO date if this is a dated event, empty otherwise" },
+          scheduled_for: { type: "string", description: "ISO date (YYYY-MM-DD) if this is a dated event — resolve relative dates (Sunday, tomorrow, next week) against the Today's date given in the input. Empty otherwise." },
           description: { type: "string", description: "one-sentence summary" },
           attributes: { type: "array", items: attrSchema },
           relations: {
@@ -149,7 +149,7 @@ export const SYSTEM = `You are an extraction engine for a personal knowledge gra
 - brand: a brand/company itself (not a specific product)
 - place: a location they go to
 - person: someone in their life
-- event: something that happens at a time
+- event: something that happens at a time. A planned trip, journey, or return home ("going back home Sunday", "flying to Berlin next week") is ALWAYS an event — emit it with scheduled_for resolved to an ISO date using Today's date.
 - org: a SPECIFIC NAMED organization the user belongs to — employer, workplace, school, team, club. Work/job/career, "my company", "where I work", "my school" map here ONLY when there is an actual organization. A skill, field, or discipline they know ("background in software development", "good with tech", "I studied biology") is NOT an org — it has no organization behind it. Route those to interest (or drop if it's just background colour).
 - interest: a subject, hobby, or field the user studies, follows, or is into (financial investment, AI, photography, chess). Not a physical thing they own — that's an item. Not a company — that's a brand/org. An interest is complete the moment it's named; it can grow more specific nodes later.
 
@@ -163,6 +163,7 @@ Their occupation is different — that IS an entity (an org). Capture a job/empl
 - home_location = where they are FROM / their permanent home ("I'm from X", "my hometown is X", "I live in X" stated as a settled fact).
 - user_current_location = where they ARE RIGHT NOW, distinct from home ("I'm in X", "I'm currently in X", "I moved to X recently", "I'm staying in X", "here in X"). Only set this when the phrasing signals present location or a recent move, not a settled home.
 - If the user says only an ambiguous "I live in X" with no signal of a recent move or being elsewhere right now, keep the existing behavior: set home_location and leave user_current_location "".
+Also set it when the user CONFIRMS being in/back in a city the interviewer just named ("did you make it back to Rzeszów?" → "yes, got in last night" → user_current_location: "Rzeszów").
 
 ## brand — link an item to the store when one is named
 When the user is shopping for, looking at, or bought an item at a named store or brand in the same slice ("pants at H&M", "shoes from Nike"), set that item's brand field to that store/brand. Do NOT leave brand empty when the store is named — the item and its brand belong linked. Only leave brand empty when no store/brand is mentioned for that item.
@@ -190,7 +191,7 @@ intent: true ONLY when the user expresses a forward-looking desire to acquire or
 - item → **Category** (belt, shoes, laptop). Emit **Brand** only when a store is named.
 - place → **Name** when the place has a proper name (Galeria Rzeszow, Monmouth Coffee). Omit Name for a generic unnamed place ("the mall") — it stays a thread until named.
 - person → **Name** (if known) and **Relationship** (friend, sister, coworker).
-- event → **When** — a date or relative time ("next week", "in August"). The title says WHAT the event is; When says when.
+- event → **When** — a date or relative time ("next week", "in August"). The title says WHAT the event is; When says when. Whenever When is resolvable to a concrete date from Today's date, ALSO set scheduled_for to that ISO date — never leave scheduled_for empty for a dated event.
 - brand → **Category** (coffee shop, clothing store). The brand's name is the title.
 - org → **Name** (the employer/school/team) and **Role** (their job title or what they do there). Title is the org's name; if the name is unknown, omit Name and it stays a thread until named.
 - interest → nothing required; the title is the interest ("Financial Investment", "AI"). Add attributes only if the user gives specifics (a resource, a focus area).
@@ -336,7 +337,7 @@ export async function synthesize(
   const empty: ExtractionResult = { attributes: [], entities: [] }
   if (!messages.length) return empty
 
-  const userContent = `${buildTrackingContext(agenda, knownNotes)}\n\nConversation slice:\n${buildWindow(messages)}`
+  const userContent = `Today's date: ${new Date().toISOString().split("T")[0]}\n\n${buildTrackingContext(agenda, knownNotes)}\n\nConversation slice:\n${buildWindow(messages)}`
 
   // Gemini 2.5 Flash primary; Cerebras gpt-oss-120b one-call fallback.
   let parsed: RawParsed

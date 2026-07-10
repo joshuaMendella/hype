@@ -1,6 +1,7 @@
 import "server-only"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { fetchCityEvents, fetchArtistTours, type ScoutFind } from "./sources"
+import { CURRENT_LOC_TTL_MS } from "@/lib/profile/currentLocation"
 
 // Scout Digest v1 — picks at most one "welcome back" find for the opener.
 // Owns: the >48h gap dedupe guard (reusing the same threshold the caller uses to
@@ -9,9 +10,6 @@ import { fetchCityEvents, fetchArtistTours, type ScoutFind } from "./sources"
 // the source APIs in parallel on a cache miss. See docs/scout/2026-07-08-scout-digest-plan.md.
 const GAP_MS = 48 * 60 * 60 * 1000
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
-// A "current location" is only trusted for 30 days — past that it's likely stale
-// (user moved on / trip ended) and we fall back to home_location instead.
-const CURRENT_LOC_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 type ScoutProfile = { home_location?: string; current_location?: string; current_location_at?: string; last_scout_shown_at?: string }
 type ScoutEntity = { title: string; entity_type: string | null }

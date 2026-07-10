@@ -71,6 +71,19 @@ async function main() {
     assert(newBarePants.length === 0, "refinement of tracked 'Pants' does not spawn a new unlinked item")
   }
 
+  // 4. Relative-date travel → event with ISO scheduled_for (workstream B, docs/graph/2026-07-10).
+  {
+    const ext = await synthesize(
+      [{ role: "assistant", content: "Anything coming up?" }, { role: "user", content: "I'm heading back home to Rzeszów on Sunday" }],
+      { current: null, pending: [] } as Agenda
+    )
+    const evt = ext.entities.find((e) => e.entity_type === "event")
+    assert(!!evt, "travel/return statement yields an event entity")
+    assert(!!evt?.scheduled_for && /^\d{4}-\d{2}-\d{2}$/.test(evt.scheduled_for), "return-home event carries an ISO scheduled_for")
+    const todayISO = new Date().toISOString().split("T")[0]
+    assert(!!evt?.scheduled_for && evt.scheduled_for >= todayISO, "resolved 'Sunday' is not in the past")
+  }
+
   console.log(failed === 0 ? "\nextract-eval: ALL OK" : `\nextract-eval: ${failed} FAILED`)
   process.exit(failed === 0 ? 0 : 1)
 }

@@ -376,6 +376,9 @@ export async function POST(req: NextRequest) {
     conversationId = created.id
   }
 
+  const LOOKBACK_DAYS = 14
+  const lookbackStart = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
+
   const [{ data: vaultNotes }, { data: todayEvents }, { data: profile }] = await Promise.all([
     supabase
       .from("vault_notes")
@@ -386,9 +389,11 @@ export async function POST(req: NextRequest) {
       .limit(20),
     supabase
       .from("vault_notes")
-      .select("title, topic, content_md, entity_type")
+      .select("id, title, topic, content_md, entity_type, scheduled_for")
       .eq("user_id", user.id)
-      .eq("scheduled_for", today)
+      .lte("scheduled_for", today)
+      .gte("scheduled_for", lookbackStart)
+      .is("event_prompted_at", null)
       .is("archived_at", null),
     supabase
       .from("profiles")
@@ -457,7 +462,7 @@ export async function POST(req: NextRequest) {
     .join("\n\n")
 
   const todayContext = todayEvents?.length
-    ? `\n\n## Scheduled for today:\n${todayEvents.map((e) => `- ${e.title}${e.topic ? ` (${e.topic})` : ""}`).join("\n")}\nOpen with one of these if it likely already happened, or wish them well if upcoming.`
+    ? `\n\n## Dated events due (scheduled for today or recently passed):\n${todayEvents.map((e) => `- ${e.title}${e.topic ? ` (${e.topic})` : ""} — scheduled ${e.scheduled_for}`).join("\n")}\nOpen by asking about one of these. It likely already happened — ask how it went. If it's a trip, return, or travel home, ask warmly whether they made it ("did you make it back to X?"). If it's scheduled for today and may still be upcoming, wish them well instead.`
     : ""
 
   const incompleteThreads = (vaultNotes ?? [])
@@ -596,6 +601,14 @@ export async function POST(req: NextRequest) {
     }
     if (isFarewell) {
       await supabase.from("conversations").update({ status: "completed" }).eq("id", conversationId)
+    }
+    // Fire-once: these dated events were injected into this turn's prompt — mark them
+    // so they're raised exactly once (RLS "vault_notes: own" covers this update).
+    if (todayEvents?.length) {
+      await supabase
+        .from("vault_notes")
+        .update({ event_prompted_at: new Date().toISOString() })
+        .in("id", todayEvents.map((e) => e.id))
     }
     // Extraction runs as a separate Sonnet pass over the recent window — off the hot path,
     // and never coupled to the conversational reply. Skipped during onboarding.

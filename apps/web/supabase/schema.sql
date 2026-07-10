@@ -159,6 +159,11 @@ ALTER TABLE public.vault_notes ADD COLUMN IF NOT EXISTS scheduled_for DATE;
 CREATE INDEX IF NOT EXISTS idx_vault_notes_scheduled
   ON public.vault_notes(user_id, scheduled_for) WHERE scheduled_for IS NOT NULL;
 
+-- Fire-once marker for the today-events opener: set when a dated event has been
+-- surfaced to the interviewer, so each event is raised exactly once (missed days
+-- still catch up on next open via the 14-day lookback in app/api/chat/route.ts).
+ALTER TABLE public.vault_notes ADD COLUMN IF NOT EXISTS event_prompted_at TIMESTAMPTZ;
+
 -- Gardener (lib/graph/reconcile.ts) soft-delete: merge/drop ops set this instead of a hard
 -- DELETE, so every op is reversible (clear the column to undo). NULL = visible/active. Every
 -- graph-facing read filters .is("archived_at", null); writes that genuinely re-mention an
