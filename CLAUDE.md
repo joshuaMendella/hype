@@ -53,6 +53,8 @@ The full session-by-session build log lives in **[CHANGELOG.md](CHANGELOG.md)** 
 7. **Scout digest (in-app welcome-back)** — built + verified, inert until keys. When a user returns after >48h, the opener can lead with one real local find (Ticketmaster city events; Bandsintown artist tours deferred until their API access) targeting `current_location` (fresh, 30-day TTL) else `home_location`. Built as a generalization of the ad-card flow. Needs `SCOUT_TICKETMASTER_KEY` in `.env.local`. Live test pending (owner mid-test with Giessen seeded). Plan: `docs/scout/2026-07-08-scout-digest-plan.md`.
 8. **Extraction live-test open items:** narrow the item→place relation (intent items pick up a stray link to the mall, not just the stores); persona confirm-before-ending + farewell→reload→carryover loop.
 9. **Landing page** built (`components/marketing/`, dark Revolut-style, consent-only-ads section); needs a visual-polish pass (hero legibility, consent-toggle feel, copy) then Vercel deploy. Spec: `docs/superpowers/specs/2026-07-03-landing-page-design.md`.
+10. **Gardener (`lib/graph/reconcile.ts`)** — whole-graph batch cleanup, built + verified (session 21). Run on command: `NODE_OPTIONS="--conditions=react-server" pnpm dlx tsx scripts/reconcile.ts` (dry-run) / `--apply` to mutate (soft + logged + reversible via `archived_at`). **Pending:** owner-gated `POST /api/admin/reconcile` + admin-panel "Tidy graph" button (preview→apply); later a per-user daily cron. Plan: `docs/graph/2026-07-10-graph-refinement-and-gardener-plan.md`.
+11. **Dated-event opener** — built + live-verified (session 21): a `scheduled_for` event surfaces in the interviewer's opener within a 14-day window, exactly once (`event_prompted_at`). Feeds the `current_location` freshness → You-link teardown. Plan: `docs/graph/2026-07-10-scheduled-events-and-location.md`.
 
 ## Extraction & interviewer rules
 The detailed extraction rules (entity types, tiers, gravity agenda, containment) and interviewer rules (agenda injection, attribute grouping, deflection, session-end) live in **[docs/engineering-canon.md](docs/engineering-canon.md)** — moved out of this file to keep session context lean. Read that doc before extraction or persona work.
@@ -120,6 +122,8 @@ apps/web/
 │   ├── supabase/server.ts          ← SSR client
 │   ├── supabase/admin.ts           ← service role (server-only)
 │   ├── graph/palettes.ts           ← node-color source of truth: topic map + 4 palette modes + backgrounds + localStorage settings
+│   ├── graph/reconcile.ts          ← Gardener: whole-graph batch cleanup (merge/retype/add_edge/drop), dry-run default, soft-delete via archived_at (run: scripts/reconcile.ts, --apply to mutate)
+│   ├── profile/currentLocation.ts  ← shared 30-day current_location TTL (isCurrentLocationFresh) — used by scout + graph You-linking
 │   ├── scout/                      ← scout digest: sources.ts (Ticketmaster/Bandsintown), getScoutFind.ts (48h gate + city cache, admin-only)
 │   └── ai/
 │       ├── synthesize.ts           ← extraction pass, Gemini 2.5 Flash primary + Cerebras fallback (strict json_schema) — feeds extractFacts; runs async off the chat turn
