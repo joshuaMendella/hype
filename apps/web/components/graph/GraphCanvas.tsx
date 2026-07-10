@@ -32,6 +32,8 @@ interface Props {
   initialData: GraphData
   refreshTrigger?: number
   settings?: GraphSettings
+  // Place titles that count as identity (home + current city) — these link to "You"; other places float.
+  identityPlaces?: string[]
 }
 
 // Links — a knowledge graph's appeal IS its connectedness, so keep edges readable.
@@ -43,7 +45,7 @@ const linkStyle: Record<string, { stroke: string; width: number }> = {
   located_in: { stroke: "#67e8f955", width: 1.25 },
 }
 
-export default function GraphCanvas({ initialData, refreshTrigger, settings = DEFAULT_SETTINGS }: Props) {
+export default function GraphCanvas({ initialData, refreshTrigger, settings = DEFAULT_SETTINGS, identityPlaces }: Props) {
   const palette = settings.palette
   const svgRef = useRef<SVGSVGElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
@@ -95,6 +97,11 @@ export default function GraphCanvas({ initialData, refreshTrigger, settings = DE
       .force("link", d3.forceLink<GraphNode, GraphLink>([]).id((d) => d.id).distance(80).strength(0.5))
       .force("charge", d3.forceManyBody().strength(-280))
       .force("center", d3.forceCenter(width / 2, height / 2))
+      // Gentle positional gravity: with You wired only to identity nodes, non-identity clusters are
+      // disconnected components — forceCenter alone centers only their centroid and lets them drift
+      // apart. A weak forceX/Y keeps every cluster framed without collapsing them into one blob.
+      .force("x", d3.forceX(width / 2).strength(0.04))
+      .force("y", d3.forceY(height / 2).strength(0.04))
       .force("collision", d3.forceCollide<GraphNode>().radius((d) => nodeRadius(degreeMapRef.current[d.id] ?? 0) + 10))
 
     simulation.on("tick", () => {
@@ -185,42 +192,22 @@ export default function GraphCanvas({ initialData, refreshTrigger, settings = DE
     })
     const links: GraphLink[] = graphData.links.map((l) => ({ ...l }))
 
-    // Connect "You" to the graph: the home screen should read as a portrait of the self,
-    // not a floating dot. Synthesize (client-side, never persisted) an edge from the
-    // _profile.md root to every top-level entity — i.e. nodes that don't already hang off
-    // a brand. Items under a brand stay nested; everything else links straight to You.
+    // Connect "You" only to IDENTITY-level nodes — the center is a portrait of the person (who
+    // they know, where they're from / live now, what they do, what they're into), NOT a hub wired
+    // to every purchase. Items, brands, and the places/events they touch stay ON the graph (being
+    // there IS the relationship) but float in their own clusters instead of tethering to You. A
+    // brand you use often is still just a brand; frequency doesn't make it identity.
     const profile = nodes.find((n) => n.path === "_profile.md")
     if (profile) {
-      const targetId = (l: GraphLink) => (typeof l.target === "string" ? l.target : (l.target as GraphNode).id)
-      const sourceId = (l: GraphLink) => (typeof l.source === "string" ? l.source : (l.source as GraphNode).id)
-      const structuralLinks = links.filter((l) => l.link_type === "brand" || l.link_type === "relation" || l.link_type === "located_in")
-      // located_in points contained→container, so its SOURCE is the child (opposite of brand/relation).
-      const childId = (l: GraphLink) => (l.link_type === "located_in" ? sourceId(l) : targetId(l))
-      const children = new Set(structuralLinks.map(childId))
-
-      // You links to every ROOT (no incoming brand/relation edge); children nest under their parent.
-      // But a pure cycle (e.g. event--"at"-->place + place--"hosts"-->event) has NO root, so the
-      // root-only rule alone would leave its whole component floating free of You — the exact
-      // "floating dot" this feature exists to prevent. Union-find the brand/relation graph and
-      // anchor any rootless component to You with a single self edge.
-      const parent = new Map<string, string>()
-      for (const n of nodes) if (n.id !== profile.id) parent.set(n.id, n.id)
-      const find = (x: string): string => { let r = x; while (parent.get(r) !== r) r = parent.get(r)!; return r }
-      for (const l of structuralLinks) {
-        const s = sourceId(l), t = targetId(l)
-        if (parent.has(s) && parent.has(t)) parent.set(find(s), find(t))
-      }
-      const rootedComponents = new Set<string>()
-      for (const n of nodes) if (n.id !== profile.id && !children.has(n.id)) rootedComponents.add(find(n.id))
-
-      const anchoredRootless = new Set<string>()
+      const IDENTITY_TYPES = new Set(["person", "org", "interest"])
+      // A place is identity only if it's the user's home or current city (passed from base_profile).
+      const identitySet = new Set((identityPlaces ?? []).map((s) => s.toLowerCase()))
       for (const n of nodes) {
         if (n.id === profile.id) continue
-        const comp = find(n.id)
-        const isRoot = !children.has(n.id)
-        const anchorRootless = !isRoot && !rootedComponents.has(comp) && !anchoredRootless.has(comp)
-        if (anchorRootless) anchoredRootless.add(comp)
-        if (isRoot || anchorRootless) {
+        const isIdentity =
+          IDENTITY_TYPES.has(n.entity_type ?? "") ||
+          (n.entity_type === "place" && identitySet.has(n.title.toLowerCase()))
+        if (isIdentity) {
           links.push({ id: `self-${n.id}`, source: profile.id, target: n.id, anchor_text: null, link_type: "self" })
         }
       }
