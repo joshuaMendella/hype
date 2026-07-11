@@ -2,28 +2,26 @@
 
 import { useEffect, useRef, useState } from "react"
 
-// §3 split scene: a plain conversation on the left, and on the right the graph writing itself
-// — each thing you say becomes a node that pops in. No forms; you just talk.
+// §2 "No forms. Just talk.": the chat IS the scene here. The graph-growing spectacle
+// belongs to §3, so this stays a warm, human back-and-forth — one natural conversation that
+// wanders across topics, with a typing beat before each reply and a soft fade on loop reset.
+// Each landed line buds a small you-spectrum node onto the row below — "a fact lands, a node
+// buds off" — the same accumulation the real graph does, in miniature.
+
+const SPECTRUM = ["#4ADE80", "#60A5FA", "#A78BFA", "#F472B6"]
 
 const CHAT: { who: "ai" | "you"; text: string }[] = [
   { who: "ai", text: "What did you get up to this weekend?" },
   { who: "you", text: "Long run Saturday, then coffee with Sarah." },
-  { who: "ai", text: "Nice — still running most mornings?" },
-  { who: "you", text: "Yeah, training for a marathon. Been playing guitar too." },
+  { who: "ai", text: "Nice — still training for that marathon?" },
+  { who: "you", text: "Yeah. Been picking the guitar back up too." },
+  { who: "ai", text: "Love that. Which one — the acoustic you mentioned?" },
 ]
-
-// Nodes that grow out of the chat, placed around a central "You".
-const NODES = [
-  { id: "run", label: "Running", color: "#34d399", x: 78, y: 22, at: 1 },
-  { id: "sarah", label: "Sarah", color: "#a78bfa", x: 86, y: 62, at: 1 },
-  { id: "marathon", label: "Marathon", color: "#f472b6", x: 60, y: 84, at: 3 },
-  { id: "guitar", label: "Guitar", color: "#2dd4bf", x: 30, y: 74, at: 3 },
-]
-const CENTER = { x: 42, y: 44 }
 
 export default function TalkDemo() {
   const ref = useRef<HTMLDivElement>(null)
   const [step, setStep] = useState(-1)
+  const [fading, setFading] = useState(false)
 
   useEffect(() => {
     const el = ref.current
@@ -35,12 +33,14 @@ export default function TalkDemo() {
         if (!e.isIntersecting) return
         io.disconnect()
         if (reduce) return setStep(CHAT.length)
-        // Reveal one chat line at a time; nodes appear as their answer lands.
-        // Then hold, reset, and replay — the scene stays alive instead of going static.
+        // Reveal one line at a time; hold, fade out, reset, replay — stays alive, never static.
         const play = () => {
-          timers = CHAT.map((_, i) => setTimeout(() => setStep(i), 400 + i * 1000))
-          timers.push(setTimeout(() => setStep(-1), 400 + CHAT.length * 1000 + 3200))
-          timers.push(setTimeout(play, 400 + CHAT.length * 1000 + 3900))
+          setFading(false)
+          timers = CHAT.map((_, i) => setTimeout(() => setStep(i), 500 + i * 1300))
+          const end = 500 + CHAT.length * 1300
+          timers.push(setTimeout(() => setFading(true), end + 3000))
+          timers.push(setTimeout(() => setStep(-1), end + 3700))
+          timers.push(setTimeout(play, end + 3900))
         }
         play()
       },
@@ -53,11 +53,16 @@ export default function TalkDemo() {
     }
   }, [])
 
-  const nodeVisible = (at: number) => step >= at
+  // A typing beat shows while the assistant "thinks" — i.e. the last revealed line was yours
+  // and the next one is the AI's, not yet arrived.
+  const typing = step >= 0 && CHAT[step]?.who === "you" && CHAT[step + 1]?.who === "ai"
 
   return (
-    <div ref={ref} className="grid items-center gap-6 sm:grid-cols-2">
-      {/* Chat */}
+    <div
+      ref={ref}
+      className="mx-auto max-w-lg transition-opacity duration-500"
+      style={{ opacity: fading ? 0 : 1 }}
+    >
       <div className="space-y-3">
         {CHAT.map((m, i) => (
           <div
@@ -66,50 +71,50 @@ export default function TalkDemo() {
             style={{ opacity: step >= i ? 1 : 0, transform: step >= i ? "none" : "translateY(10px)" }}
           >
             <div
-              className={`max-w-[80%] rounded-2xl px-5 py-3 text-[15px] ${
+              className={`max-w-[82%] rounded-2xl px-5 py-3 text-[1.0625rem] leading-relaxed ${
                 m.who === "you"
-                  ? "bg-[#60a5fa] text-black shadow-[0_0_30px_-10px_rgba(96,165,250,0.8)]"
-                  : "border border-white/10 bg-white/[0.05] text-white/85 light:border-black/10 light:bg-black/[0.04] light:text-black/80"
+                  ? "bg-you-blue text-void shadow-[0_0_30px_-10px_rgba(96,165,250,0.8)]"
+                  : "border border-edge bg-mist/[0.05] text-mist/85 light:border-black/10 light:bg-black/[0.04] light:text-black/80"
               }`}
             >
               {m.text}
             </div>
           </div>
         ))}
+
+        {/* Typing indicator — the assistant's turn, mid-thought */}
+        <div
+          className="flex justify-start transition-opacity duration-300"
+          style={{ opacity: typing ? 1 : 0 }}
+          aria-hidden="true"
+        >
+          <div className="flex gap-1 rounded-2xl border border-edge bg-mist/[0.05] px-4 py-3.5 light:border-black/10 light:bg-black/[0.04]">
+            {[0, 1, 2].map((d) => (
+              <span
+                key={d}
+                className="h-1.5 w-1.5 rounded-full bg-mist/50 light:bg-black/40"
+                style={{ animation: "talkdot 1.2s ease-in-out infinite", animationDelay: `${d * 0.18}s` }}
+              />
+            ))}
+          </div>
+        </div>
       </div>
 
-      {/* Graph writing itself */}
-      <div className="relative aspect-square w-full">
-        <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full" aria-hidden="true">
-          {NODES.map((n) => (
-            <line
-              key={n.id}
-              x1={CENTER.x} y1={CENTER.y} x2={n.x} y2={n.y}
-              strokeWidth={0.4}
-              style={{ stroke: "var(--g-link-self)", opacity: nodeVisible(n.at) ? 1 : 0, transition: "opacity 0.6s" }}
-            />
-          ))}
-          <circle cx={CENTER.x} cy={CENTER.y} r={4.5} style={{ fill: "var(--g-you)" }} />
-          <text x={CENTER.x} y={CENTER.y + 9} textAnchor="middle" fontSize="4" style={{ fontFamily: "var(--font-body)", fill: "var(--g-label-hub)" }}>You</text>
-          {NODES.map((n) => (
-            <g
-              key={n.id}
-              style={{
-                opacity: nodeVisible(n.at) ? 1 : 0,
-                transform: nodeVisible(n.at) ? "scale(1)" : "scale(0)",
-                transformOrigin: `${n.x}px ${n.y}px`,
-                transition: "opacity 0.5s, transform 0.6s cubic-bezier(0.34,1.56,0.64,1)",
-              }}
-            >
-              <circle cx={n.x} cy={n.y} r={8} fill={n.color} opacity={0.22} />
-              <circle cx={n.x} cy={n.y} r={3.4} fill={n.color} />
-              <text x={n.x} y={n.y + 8} textAnchor="middle" fontSize="3.4" style={{ fontFamily: "var(--font-body)", fill: "var(--g-label-hub)" }}>
-                {n.label}
-              </text>
-            </g>
-          ))}
-        </svg>
+      {/* A node buds off for each fact that's landed. */}
+      <div className="mt-5 flex justify-center gap-2" aria-hidden="true">
+        {CHAT.map((_, i) => (
+          <span
+            key={i}
+            className={`h-1.5 w-1.5 rounded-full transition-opacity duration-200 ${step >= i ? "node-bud" : "opacity-0"}`}
+            style={{
+              background: SPECTRUM[i % SPECTRUM.length],
+              boxShadow: step >= i ? `0 0 8px 1px ${SPECTRUM[i % SPECTRUM.length]}` : "none",
+            }}
+          />
+        ))}
       </div>
+
+      <style>{`@keyframes talkdot{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}`}</style>
     </div>
   )
 }

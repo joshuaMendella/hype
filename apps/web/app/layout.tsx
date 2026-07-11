@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next"
-import { Geist, Poppins, Space_Grotesk, Inter } from "next/font/google"
+import { Geist, Poppins, Space_Grotesk, Inter, Bricolage_Grotesque, Hanken_Grotesk, Space_Mono } from "next/font/google"
 import "./globals.css"
 
 const geist = Geist({ subsets: ["latin"] })
@@ -8,7 +8,7 @@ const poppins = Poppins({
   weight: ["300", "400"],
   variable: "--font-poppins",
 })
-// Landing page faces: Space Grotesk (tight display) + Inter (body). App keeps Geist/Poppins.
+// Space Grotesk + Inter: retained as the app-wide font-display/font-body default. App keeps Geist/Poppins elsewhere.
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
   weight: ["500", "600", "700"],
@@ -17,6 +17,23 @@ const spaceGrotesk = Space_Grotesk({
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
+})
+// Landing page redesign faces — scoped to `.landing` in globals.css (does not affect the rest
+// of the app). Bricolage Grotesque = display/headlines, Hanken Grotesk = body, Space Mono = kickers.
+const bricolage = Bricolage_Grotesque({
+  subsets: ["latin"],
+  weight: ["600", "700", "800"],
+  variable: "--font-bricolage",
+})
+const hanken = Hanken_Grotesk({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-hanken",
+})
+const spaceMono = Space_Mono({
+  subsets: ["latin"],
+  weight: ["400", "700"],
+  variable: "--font-space-mono",
 })
 
 export const viewport: Viewport = {
@@ -36,7 +53,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="h-full">
-      <body className={`${geist.className} ${poppins.variable} ${spaceGrotesk.variable} ${inter.variable} h-full bg-[#0d0d0d] text-white antialiased`}>
+      <body className={`${geist.className} ${poppins.variable} ${spaceGrotesk.variable} ${inter.variable} ${bricolage.variable} ${hanken.variable} ${spaceMono.variable} h-full bg-[#0d0d0d] text-white antialiased`}>
         {children}
       </body>
     </html>

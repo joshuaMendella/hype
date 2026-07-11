@@ -36,14 +36,14 @@ export default function GrowthTimeline() {
   }, [])
 
   return (
-    <div ref={ref} className="rounded-3xl border border-white/10 bg-white/[0.02] p-4 light:border-black/10 light:bg-white sm:p-6">
-      <div className="relative mx-auto aspect-[4/3] w-full max-w-2xl">
+    <div ref={ref} className="rounded-3xl border border-edge bg-mist/[0.02] p-4 light:border-black/10 light:bg-white sm:p-6">
+      <div className="relative mx-auto aspect-[4/3] w-full max-w-3xl">
         <DemoGraph progress={progress} className="h-full w-full" />
       </div>
       <div className="mx-auto mt-4 max-w-md">
-        <div className="mb-2 flex items-center justify-between text-xs text-white/50 light:text-black/50">
+        <div className="mb-2 flex items-center justify-between text-xs text-mist/50 light:text-black/50">
           <span>Week 1</span>
-          <span className="font-display text-base font-semibold text-[#4ade80] light:text-[#15803d]">Week {week}</span>
+          <span className="font-display text-base font-bold text-you-purple light:text-[#7c3aed]">Week {week}</span>
           <span>Week 8</span>
         </div>
         <input
@@ -54,7 +54,7 @@ export default function GrowthTimeline() {
           value={progress}
           onChange={(e) => setProgress(Number(e.target.value))}
           aria-label="Scrub through weeks of graph growth"
-          className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/15 accent-[#4ade80] light:bg-black/15 light:accent-[#15803d]"
+          className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-mist/15 accent-[#a78bfa] light:bg-black/15 light:accent-[#7c3aed]"
         />
       </div>
     </div>
