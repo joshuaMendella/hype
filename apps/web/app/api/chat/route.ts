@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server"
 import { createClient, createBearerClient } from "@/lib/supabase/server"
 import { extractFacts, closeSession } from "@/lib/ai/extract"
 import { synthesize, isPlaceholderName } from "@/lib/ai/synthesize"
+import { buildVaultContext } from "@/lib/ai/vaultContext"
 import { CHECKLIST_PROMPT, type Agenda } from "@/lib/ai/checklists"
 import { getTier1Missing, type EntityType } from "@/lib/ai/entityTypes"
 import { getScoutFind } from "@/lib/scout/getScoutFind"
@@ -386,7 +387,9 @@ export async function POST(req: NextRequest) {
       .eq("user_id", user.id)
       .is("archived_at", null) // don't hand the interviewer a gardener-archived node as live context
       .order("updated_at", { ascending: false })
-      .limit(20),
+      // Whole vault (capped): top-20 by relevance get full content, the rest ride as a
+      // titles-only index — full-vault visibility is what makes recall work (buildVaultContext).
+      .limit(500),
     supabase
       .from("vault_notes")
       .select("id, title, topic, content_md, entity_type, scheduled_for")
@@ -437,29 +440,8 @@ export async function POST(req: NextRequest) {
     // ambiguous — fall through to the normal interviewer path below
   }
 
-  // Order the window so notes tied to what we're talking about lead — models weight the top
-  // of a long context more than the middle, so the connect-the-dots facts should come first.
-  // Stable sort: ties keep the query's recency order. (When the vault outgrows limit(20),
-  // swap this heuristic for graph-hop selection off vault_links.)
-  const currentTitle = agenda.current?.title?.toLowerCase()
-  const currentTags = new Set((agenda.current?.tags ?? []).map((t) => t.toLowerCase()))
-  const pendingTitles = new Set(agenda.pending.map((p) => p.title.toLowerCase()))
-  const relevance = (n: { title: string; topic: string | null }) => {
-    const t = n.title.toLowerCase()
-    if (currentTitle && t === currentTitle) return 3
-    if (pendingTitles.has(t)) return 2
-    if (n.topic && currentTags.has(n.topic.toLowerCase())) return 1
-    return 0
-  }
-  const orderedNotes = [...(vaultNotes ?? [])]
-    .filter((n) => n.content_md?.trim())
-    .sort((a, b) => relevance(b) - relevance(a))
-
-  // Single fact block: the ### headers already list every captured title, so a separate
-  // "known facts" title list was just duplicating these bytes. Header carries the don't-re-ask rule.
-  const vaultContext = orderedNotes
-    .map((n) => `### ${n.topic ? `[${n.topic}] ` : ""}${n.title}\n${n.content_md}`)
-    .join("\n\n")
+  // Top-20 relevant notes in full + titles-only index for the rest — see lib/ai/vaultContext.
+  const vaultContext = buildVaultContext(vaultNotes ?? [], agenda)
 
   const todayContext = todayEvents?.length
     ? `\n\n## Dated events due (scheduled for today or recently passed):\n${todayEvents.map((e) => `- ${e.title}${e.topic ? ` (${e.topic})` : ""} — scheduled ${e.scheduled_for}`).join("\n")}\nOpen by asking about one of these. It likely already happened — ask how it went. If it's a trip, return, or travel home, ask warmly whether they made it ("did you make it back to X?"). If it's scheduled for today and may still be upcoming, wish them well instead.`
@@ -470,6 +452,8 @@ export async function POST(req: NextRequest) {
     // title ("another mall") — the latter has no incomplete flag but still needs a real name,
     // so surface it here to self-heal legacy/leaked junk instead of orphaning it.
     .filter((n) => n.entity_type && (n.content_md?.includes("incomplete: true") || isPlaceholderName(n.title)))
+    // Whole-vault scan now — cap it so a backlog can't flood the prompt.
+    .slice(0, 8)
     .map((n) => {
       if (isPlaceholderName(n.title)) return `- ${n.title} (${n.entity_type}): still need its real name`
       const missing = getTier1Missing(n.entity_type as EntityType, n.content_md ?? "")
