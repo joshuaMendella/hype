@@ -33,10 +33,12 @@ export function buildVaultContext(notes: VaultContextNote[], agenda: AgendaLike)
   const withContent = notes.filter((n) => n.content_md?.trim())
   const ordered = [...withContent].sort((a, b) => relevance(b) - relevance(a))
   const full = ordered.slice(0, FULL_CONTENT_COUNT)
-  const fullTitles = new Set(full.map((n) => n.title))
+  const fullSet = new Set(full)
   // The index covers every note not shown in full — including content-less ones;
-  // knowing a node exists is exactly what recall needs.
-  const indexed = notes.filter((n) => !fullTitles.has(n.title))
+  // knowing a node exists is exactly what recall needs. Excluded by object identity,
+  // not title: vault_notes titles aren't unique, and a title match would drop a
+  // duplicate-titled note from both sections.
+  const indexed = notes.filter((n) => !fullSet.has(n))
 
   const fullBlock = full
     .map((n) => `### ${n.topic ? `[${n.topic}] ` : ""}${n.title}\n${n.content_md}`)

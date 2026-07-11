@@ -41,4 +41,12 @@ const emptyAgenda = { current: null, pending: [] }
   assert(!out.includes("### [Food & Drink] Note 99"), "content-less note must not be a full block")
 }
 
+// 5) duplicate titles: the twin outside the full window still appears in the index
+{
+  const notes = [...Array.from({ length: 20 }, (_, i) => note(i)), note(0, { content_md: "different content", topic: "Travel" })]
+  const out = buildVaultContext(notes, emptyAgenda)
+  assert(out.includes("### [Food & Drink] Note 0\ncontent 0"), "original Note 0 must stay a full block")
+  assert(out.includes("- Note 0 (place) [Travel]"), "duplicate-title twin must appear in the index")
+}
+
 console.log("vault-context checks passed")
