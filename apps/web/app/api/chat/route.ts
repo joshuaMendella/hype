@@ -109,6 +109,84 @@ async function cerebrasChat(system: string, history: ChatMsg[]): Promise<string>
   return raw
 }
 
+// Streaming variant — opens Gemini's SSE stream and returns the raw fetch Response.
+// Caller checks res.ok BEFORE committing to a streamed reply, so a Gemini failure
+// still falls through to the JSON path (Cerebras fallback intact).
+async function geminiStreamFetch(system: string, history: ChatMsg[]): Promise<Response> {
+  if (!GEMINI_KEY) throw new Error("GEMINI_API_KEY not set")
+  const contents = history.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }],
+  }))
+  if (contents.length === 0) contents.push({ role: "user", parts: [{ text: "(Start the conversation.)" }] })
+  return fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_CHAT_MODEL}:streamGenerateContent?alt=sse&key=${GEMINI_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: system }] },
+        contents,
+        generationConfig: { temperature: 0.8, thinkingConfig: { thinkingBudget: 0 }, maxOutputTokens: 512 },
+      }),
+    }
+  )
+}
+
+// Re-emits Gemini's SSE stream as ndjson lines ({"t":chunk}* then {"done":true}),
+// accumulating the full text. resolveFinal feeds the after()-registered finishTurn:
+// full text on success, null on mid-stream failure (partial replies are never persisted).
+function ndjsonResponse(upstream: ReadableStream<Uint8Array>, resolveFinal: (reply: string | null) => void): Response {
+  const encoder = new TextEncoder()
+  const decoder = new TextDecoder()
+  const out = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let full = ""
+      let buf = ""
+      const reader = upstream.getReader()
+      try {
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          const lines = buf.split("\n")
+          buf = lines.pop() ?? ""
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue
+            const payload = line.slice(5).trim()
+            if (!payload || payload === "[DONE]") continue
+            try {
+              const text = JSON.parse(payload)?.candidates?.[0]?.content?.parts?.[0]?.text
+              if (text) {
+                full += text
+                controller.enqueue(encoder.encode(JSON.stringify({ t: text }) + "\n"))
+              }
+            } catch { /* non-JSON keepalive line — skip */ }
+          }
+        }
+        // Empty stream = provider hiccup: signal error instead of persisting nothing —
+        // the non-stream path treats an empty reply as a failure too.
+        if (full.trim()) {
+          resolveFinal(full.trim())
+          controller.enqueue(encoder.encode(JSON.stringify({ done: true }) + "\n"))
+        } else {
+          resolveFinal(null)
+          controller.enqueue(encoder.encode(JSON.stringify({ error: true }) + "\n"))
+        }
+      } catch (err) {
+        console.error("[chat] stream failed mid-flight:", err)
+        resolveFinal(null)
+        controller.enqueue(encoder.encode(JSON.stringify({ error: true }) + "\n"))
+      } finally {
+        controller.close()
+      }
+    },
+  })
+  return new Response(out, {
+    headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache" },
+  })
+}
+
 // Gemini structured-output schema for the onboarding turn (uppercase OpenAPI-subset types,
 // same shape synthesize.ts uses). Forces {reply, onboarding_complete} so the completion signal
 // is never lost to prose. extraction is omitted deliberately — onboarding never extracts.
@@ -318,8 +396,9 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json()
-  const { messages } = body as {
+  const { messages, stream } = body as {
     messages: Array<{ role: "user" | "assistant"; content: string }>
+    stream?: boolean
   }
 
   if (!Array.isArray(messages)) {
@@ -538,50 +617,24 @@ export async function POST(req: NextRequest) {
       content: m.role === "user" ? m.content.replace(/\[.*?\]/g, "").trim() : m.content,
     }))
 
-  // Gemini 2.5 Flash primary; Cerebras gpt-oss-120b fallback.
-  let raw: string
-  try {
-    raw = await geminiChat(systemPrompt, history, isOnboarding ? ONBOARDING_SCHEMA : undefined)
-  } catch (gemErr) {
-    console.error("[chat] Gemini chat failed, falling back to Cerebras:", gemErr)
-    logEvent("chat_fallback", { err: String(gemErr) }, user.id)
-    try {
-      raw = await cerebrasChat(systemPrompt, history)
-    } catch (cereErr) {
-      console.error("[chat] chat failed (both providers):", cereErr)
-      logEvent("chat_failed_both", { err: String(cereErr) }, user.id)
-      const isRateLimit = String(gemErr).includes(" 429") || String(cereErr).includes(" 429")
-      return NextResponse.json({ error: isRateLimit ? "rate_limit" : "chat_error" }, { status: isRateLimit ? 429 : 502 })
-    }
-  }
-  console.log("[chat] raw:", raw.slice(0, 200))
-
-  // Interview path returns plain text. Only onboarding still uses a small JSON contract
-  // (reply + onboarding_complete) — no extraction, so the JSON-leak risk is negligible.
-  let reply = raw.trim()
+  // ── Post-reply work, shared by both paths ─────────────────────────────────
+  // after() must be registered while the request scope is alive, but on the streaming
+  // path the final text only exists once the response has been flowing — so register
+  // it up front and feed it through this deferred. EVERY return path below must call
+  // resolveFinal (null = nothing to persist), or the after() callback would hang.
+  let resolveFinal: (reply: string | null) => void = () => {}
+  const finalReply = new Promise<string | null>((r) => { resolveFinal = r })
   let onboardingComplete = false
-  if (isOnboarding) {
-    const parseOnboarding = (s: string) => {
-      const parsed = JSON.parse(s)
-      reply = parsed.reply ?? raw
-      onboardingComplete = parsed.onboarding_complete === true
-    }
-    try {
-      parseOnboarding(raw)
-    } catch {
-      const jsonMatch = raw.match(/\{[\s\S]*\}/)
-      if (jsonMatch) { try { parseOnboarding(jsonMatch[0]) } catch { /* fall back to raw */ } }
-    }
-  }
-  console.log("[chat] reply:", reply.slice(0, 150))
 
-  // Sign-off always contains "Talk soon" (system prompt mandates it); wrap-up *proposals*
-  // ("want to pick this up tomorrow?") deliberately don't, so they never close prematurely.
-  const trimmedReply = reply.trim()
-  const isFarewell = /talk soon[.!]?\s*$/i.test(trimmedReply) && trimmedReply.length <= 80
+  async function finishTurn(reply: string) {
+    if (!user) return // narrows for TS within this closure; already checked above
+    const trimmedReply = reply.trim()
+    // Sign-off always contains "Talk soon" (system prompt mandates it); wrap-up *proposals*
+    // ("want to pick this up tomorrow?") deliberately don't, so they never close prematurely.
+    const isFarewell = /talk soon[.!]?\s*$/i.test(trimmedReply) && trimmedReply.length <= 80
+    const lastUserMsg = messages.findLast((m) => m.role === "user")
+    if (!lastUserMsg || !conversationId) return
 
-  const lastUserMsg = messages.findLast((m) => m.role === "user")
-  if (lastUserMsg && conversationId) {
     await supabase.from("messages").insert([
       { conversation_id: conversationId, role: "user", content: lastUserMsg.content },
       { conversation_id: conversationId, role: "assistant", content: reply },
@@ -600,19 +653,72 @@ export async function POST(req: NextRequest) {
         .update({ event_prompted_at: new Date().toISOString() })
         .in("id", todayEvents.map((e) => e.id))
     }
-    // Extraction runs as a separate Sonnet pass over the recent window — off the hot path,
-    // and never coupled to the conversational reply. Skipped during onboarding.
+    // Extraction: separate structured pass over the recent window — never coupled to the
+    // conversational reply. Skipped during onboarding. (Already post-response here.)
     if (!isOnboarding) {
-      // Ad-flow turns are excluded so the extractor never mines the ad exchange.
       const messagesForExtraction = messages.filter((m) => !isAdFlowMessage(m))
-      after(() =>
-        synthesize(messagesForExtraction, agenda, vaultNotes ?? [])
-          .then((extraction) => extractFacts(conversationId, user.id, extraction))
-          .then(() => (isFarewell ? closeSession(conversationId, user.id).then(() => {}) : undefined))
-          .catch((err) => console.error("[chat] extraction failed:", err))
-      )
+      await synthesize(messagesForExtraction, agenda, vaultNotes ?? [])
+        .then((extraction) => extractFacts(conversationId, user.id, extraction))
+        .then(() => (isFarewell ? closeSession(conversationId, user.id).then(() => {}) : undefined))
+        .catch((err) => console.error("[chat] extraction failed:", err))
     }
   }
+
+  after(async () => {
+    const reply = await finalReply
+    if (reply != null) await finishTurn(reply)
+  })
+
+  // ── Streaming path (opt-in; web client only) ──────────────────────────────
+  // Never streams: onboarding (JSON schema contract) or a scout-card opener (card rides
+  // in JSON). Ad short-circuits returned above. Mobile sends no stream flag → JSON.
+  if (stream === true && !isOnboarding && !scoutFind) {
+    const upstream = await geminiStreamFetch(systemPrompt, history).catch(() => null)
+    if (upstream?.ok && upstream.body) {
+      return ndjsonResponse(upstream.body, resolveFinal)
+    }
+    console.error("[chat] Gemini stream connect failed, using JSON path:", upstream?.status)
+    // fall through — JSON path below retries Gemini non-streaming, then Cerebras.
+  }
+
+  // ── JSON path (identical contract to before streaming existed) ────────────
+  let raw: string
+  try {
+    raw = await geminiChat(systemPrompt, history, isOnboarding ? ONBOARDING_SCHEMA : undefined)
+  } catch (gemErr) {
+    console.error("[chat] Gemini chat failed, falling back to Cerebras:", gemErr)
+    logEvent("chat_fallback", { err: String(gemErr) }, user.id)
+    try {
+      raw = await cerebrasChat(systemPrompt, history)
+    } catch (cereErr) {
+      console.error("[chat] chat failed (both providers):", cereErr)
+      logEvent("chat_failed_both", { err: String(cereErr) }, user.id)
+      resolveFinal(null)
+      const isRateLimit = String(gemErr).includes(" 429") || String(cereErr).includes(" 429")
+      return NextResponse.json({ error: isRateLimit ? "rate_limit" : "chat_error" }, { status: isRateLimit ? 429 : 502 })
+    }
+  }
+  console.log("[chat] raw:", raw.slice(0, 200))
+
+  // Interview path returns plain text. Only onboarding still uses a small JSON contract
+  // (reply + onboarding_complete) — no extraction, so the JSON-leak risk is negligible.
+  let reply = raw.trim()
+  if (isOnboarding) {
+    const parseOnboarding = (s: string) => {
+      const parsed = JSON.parse(s)
+      reply = parsed.reply ?? raw
+      onboardingComplete = parsed.onboarding_complete === true
+    }
+    try {
+      parseOnboarding(raw)
+    } catch {
+      const jsonMatch = raw.match(/\{[\s\S]*\}/)
+      if (jsonMatch) { try { parseOnboarding(jsonMatch[0]) } catch { /* fall back to raw */ } }
+    }
+  }
+  console.log("[chat] reply:", reply.slice(0, 150))
+
+  resolveFinal(reply)
 
   const scoutCard: AdCard | undefined = scoutFind
     ? { kind: "scout", title: scoutFind.title, date: scoutFind.date, venue: scoutFind.venue, url: scoutFind.url, source: scoutFind.source }

@@ -52,8 +52,13 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
   const [loading, setLoading] = useState(!seeded)
   const [canInput, setCanInput] = useState(false)
   const [focused, setFocused] = useState(false)
+  // Current message arrived via stream → bypass the typewriter (text is already incremental).
+  const [streamMode, setStreamMode] = useState(false)
+  const [streamDone, setStreamDone] = useState(true)
   const inputRef = useRef<HTMLInputElement>(null)
-  const { displayed, done } = useTypewriter(currentAi)
+  const { displayed, done } = useTypewriter(streamMode ? "" : currentAi)
+  const shownText = streamMode ? currentAi : displayed
+  const shownDone = streamMode ? streamDone : done
 
   useEffect(() => {
     if (seeded) return // restored an active conversation — show where we left off, no opener fetch
@@ -97,21 +102,60 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next, userId }),
+        body: JSON.stringify({ messages: next, userId, stream: true }),
       })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
+        setStreamMode(false)
         setCurrentAi(body.error === "rate_limit"
           ? "I've hit my daily message limit — check back in a bit."
           : "Something slipped on my end — want to try that again?")
         return
       }
-      const { reply, card: newCard } = await res.json()
-      setCurrentAi(reply)
-      setCard(newCard ?? null)
-      onReply?.()
+      const ct = res.headers.get("content-type") ?? ""
+      if (ct.includes("application/x-ndjson") && res.body) {
+        // Real stream: append chunks as they arrive; typewriter stays out of the way.
+        setStreamMode(true)
+        setStreamDone(false)
+        setLoading(false)
+        setAiVisible(true)
+        let acc = ""
+        let errored = false
+        const handleLine = (line: string) => {
+          if (!line.trim()) return
+          try {
+            const evt = JSON.parse(line)
+            if (evt.t) { acc += evt.t; setCurrentAi(acc) }
+            if (evt.error) errored = true
+          } catch { /* torn line — skip */ }
+        }
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buf = ""
+        for (;;) {
+          const { done: rdDone, value } = await reader.read()
+          if (rdDone) break
+          buf += decoder.decode(value, { stream: true })
+          const lines = buf.split("\n")
+          buf = lines.pop() ?? ""
+          lines.forEach(handleLine)
+        }
+        handleLine(buf)
+        if (!acc) setCurrentAi("Something slipped on my end — want to try that again?") // errored or empty stream
+        setStreamDone(true)
+        setCanInput(true)
+        onReply?.()
+      } else {
+        // JSON path — onboarding, cards, or stream fallback. Typewriter as before.
+        const { reply, card: newCard } = await res.json()
+        setStreamMode(false)
+        setCurrentAi(reply)
+        setCard(newCard ?? null)
+        onReply?.()
+      }
     } catch {
       // network failure / bad JSON — surface it instead of an unhandled rejection + silent stall
+      setStreamMode(false)
       setCurrentAi("Something slipped on my end — want to try that again?")
     } finally {
       setLoading(false)
@@ -160,8 +204,8 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
             transition: "opacity 0.2s ease",
           }}
         >
-          {displayed}
-          {!done && (
+          {shownText}
+          {!shownDone && (
             <span
               className="inline-block align-middle animate-pulse"
               style={{
