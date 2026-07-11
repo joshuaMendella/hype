@@ -218,6 +218,10 @@ export default function GraphCanvas({ initialData, refreshTrigger, settings = DE
     const isFirstDraw = seen.size === 0
     const isNew = (id: string) => !isFirstDraw && !seen.has(id)
 
+    // Fresh-vault moment: the very first draw with only the You node (onboarding) gets a
+    // real birth — elastic pop, two ripple rings, and a breathing glow while it's alone.
+    const bloomSolo = isFirstDraw && nodes.length === 1
+
     // Degree map for node sizing — also read by the collision force accessor via degreeMapRef.
     const degreeMap: Record<string, number> = {}
     links.forEach((l) => {
@@ -284,18 +288,34 @@ export default function GraphCanvas({ initialData, refreshTrigger, settings = DE
           // Main circle — every node filled and colored by topic (one color axis)
           const core = sel.append("circle")
             .attr("class", "core")
-            .attr("r", (d) => (isNew(d.id) ? 0 : nodeRadius(degreeMap[d.id] ?? 0)))
+            .attr("r", (d) => (isNew(d.id) || bloomSolo ? 0 : nodeRadius(degreeMap[d.id] ?? 0)))
             .attr("fill", (d) => nodeColorFor(d.topic, palette))
             .attr("opacity", 0.85)
 
           // Dramatize node birth: new nodes scale in with an elastic pop + a one-shot glow pulse.
-          core.filter((d) => isNew(d.id))
+          core.filter((d) => isNew(d.id) || bloomSolo)
             .transition().duration(750).ease(d3.easeElasticOut.amplitude(1).period(0.5))
             .attr("r", (d) => nodeRadius(degreeMap[d.id] ?? 0))
-          glow.filter((d) => isNew(d.id))
+          glow.filter((d) => isNew(d.id) || bloomSolo)
             .attr("opacity", 0.5)
             .transition().duration(900).ease(d3.easeCubicOut)
             .attr("opacity", 0.1)
+
+          // Birth ripples — two one-shot expanding rings, then gone.
+          if (bloomSolo) {
+            for (const delay of [150, 550]) {
+              sel.append("circle")
+                .attr("fill", "none")
+                .attr("stroke", (d) => nodeColorFor(d.topic, palette))
+                .attr("stroke-width", 1.5)
+                .attr("opacity", 0.55)
+                .attr("r", (d) => nodeRadius(degreeMap[d.id] ?? 0))
+                .transition().delay(delay).duration(1400).ease(d3.easeCubicOut)
+                .attr("r", (d) => nodeRadius(degreeMap[d.id] ?? 0) * 6)
+                .attr("opacity", 0)
+                .remove()
+            }
+          }
 
           sel.append("text")
             .text((d) => d.title)
@@ -358,6 +378,19 @@ export default function GraphCanvas({ initialData, refreshTrigger, settings = DE
         (exit) => exit.remove()
       )
     nodeSelRef.current = node
+
+    // A lone node breathes so a fresh graph feels alive; company arrives → back to static.
+    const glows = nodesGroup.selectAll<SVGCircleElement, GraphNode>("circle.glow")
+    if (nodes.length === 1) {
+      const breathe = (s: d3.Selection<SVGCircleElement, GraphNode, d3.BaseType, unknown>) => {
+        s.transition("breathe").duration(1600).ease(d3.easeSinInOut).attr("opacity", 0.32)
+          .transition().duration(1600).ease(d3.easeSinInOut).attr("opacity", 0.1)
+          .on("end", function () { breathe(d3.select(this as SVGCircleElement) as d3.Selection<SVGCircleElement, GraphNode, d3.BaseType, unknown>) })
+      }
+      breathe(glows)
+    } else {
+      glows.interrupt("breathe").attr("opacity", 0.1)
+    }
 
     // Remember what we've drawn so only truly-new nodes animate next time
     seenNodeIdsRef.current = new Set(nodes.map((n) => n.id))
