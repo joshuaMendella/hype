@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client"
 import type { GraphData, GraphNode, GraphLink, VaultNote } from "@/types/database"
 import { parseAttributes } from "./parseAttributes"
 import { nodeColorFor, DEFAULT_SETTINGS, type GraphSettings } from "@/lib/graph/palettes"
+import { shareGraphImage } from "@/lib/graph/shareImage"
 
 const escHtml = (s: string) => s.replace(/[&<>]/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;"))
 
@@ -55,6 +56,18 @@ export default function GraphCanvas({ initialData, refreshTrigger, settings = DE
   // Track which node IDs we've already drawn, so genuinely new nodes can animate in
   const seenNodeIdsRef = useRef<Set<string>>(new Set())
   const [graphData, setGraphData] = useState<GraphData>(initialData)
+  const [sharing, setSharing] = useState(false)
+  const handleShare = useCallback(async () => {
+    if (!svgRef.current || sharing) return
+    setSharing(true)
+    try {
+      await shareGraphImage(svgRef.current, settings.background)
+    } catch (err) {
+      console.error("[graph] share failed:", err)
+    } finally {
+      setSharing(false)
+    }
+  }, [sharing, settings.background])
 
   // Persistent D3 machinery — created once on mount, reused across renders
   const gRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null)
@@ -447,6 +460,20 @@ export default function GraphCanvas({ initialData, refreshTrigger, settings = DE
         ref={tooltipRef}
         className="fixed pointer-events-none text-xs bg-black/85 text-white/80 px-2.5 py-1.5 rounded-md border border-white/10 opacity-0 transition-opacity duration-100 z-50 max-w-xs leading-relaxed"
       />
+      {graphData.nodes.length > 1 && (
+        <button
+          onClick={handleShare}
+          aria-label="Share my graph"
+          title="Share my graph"
+          className="fixed bottom-6 right-6 z-40 flex items-center justify-center w-10 h-10 rounded-full border border-white/15 bg-black/40 text-white/50 hover:text-white/90 hover:border-white/35 transition-colors"
+          style={{ opacity: sharing ? 0.4 : 1 }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
+            <line x1="8.6" y1="10.5" x2="15.4" y2="6.5" /><line x1="8.6" y1="13.5" x2="15.4" y2="17.5" />
+          </svg>
+        </button>
+      )}
     </>
   )
 }
