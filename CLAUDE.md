@@ -46,7 +46,7 @@ The full session-by-session build log lives in **[CHANGELOG.md](CHANGELOG.md)** 
 ## START OF NEXT SESSION checklist
 1. Run `git log --oneline -5` to confirm state
 2. Run `cd apps/web && pnpm dev` to start the dev server
-3. Chat AND extraction both run on **Gemini 2.5 Flash primary** (GEMINI_API_KEY), with **Cerebras gpt-oss-120b as fallback** (CEREBRAS_API_KEY) if Gemini fails/rate-limits. Chat = `app/api/chat/route.ts` (`geminiChat`→`cerebrasChat`), plain text on the interview path. Extraction = `lib/ai/synthesize.ts`, separate structured-output call. Both keys in .env.local; no Anthropic key needed.
+3. Chat AND extraction both run on **Gemini 2.5 Flash primary** (GEMINI_API_KEY), with **Cerebras gpt-oss-120b as fallback** (CEREBRAS_API_KEY) if Gemini fails/rate-limits. Chat = `app/api/chat/route.ts` (`geminiChat`→`cerebrasChat`), plain text on the interview path. Extraction = `lib/ai/synthesize.ts`, separate structured-output call. Both keys in .env.local; no Anthropic key needed. Web chat streams opt-in (`stream: true` → ndjson; content-type decides client-side); mobile/onboarding/ad/scout paths stay plain JSON.
 4. To reset everything for testing: `/hype-reset` (wipes vault, clears agenda, resets onboarding flag)
 5. Root "You" node is always at path `_profile.md`, topic `Profile` — extraction depends on this
 6. `.mcp.json` is gitignored — Supabase MCP needs `SUPABASE_ACCESS_TOKEN` set locally in the file (not committed)
@@ -55,6 +55,7 @@ The full session-by-session build log lives in **[CHANGELOG.md](CHANGELOG.md)** 
 9. **Landing page** built (`components/marketing/`, dark Revolut-style, consent-only-ads section); needs a visual-polish pass (hero legibility, consent-toggle feel, copy) then Vercel deploy. Spec: `docs/superpowers/specs/2026-07-03-landing-page-design.md`.
 10. **Gardener (`lib/graph/reconcile.ts`)** — whole-graph batch cleanup, built + verified (session 21). Run on command: `NODE_OPTIONS="--conditions=react-server" pnpm dlx tsx scripts/reconcile.ts` (dry-run) / `--apply` to mutate (soft + logged + reversible via `archived_at`). **Pending:** owner-gated `POST /api/admin/reconcile` + admin-panel "Tidy graph" button (preview→apply); later a per-user daily cron. Plan: `docs/graph/2026-07-10-graph-refinement-and-gardener-plan.md`.
 11. **Dated-event opener** — built + live-verified (session 21): a `scheduled_for` event surfaces in the interviewer's opener within a 14-day window, exactly once (`event_prompted_at`). Feeds the `current_location` freshness → You-link teardown. Plan: `docs/graph/2026-07-10-scheduled-events-and-location.md`.
+12. **Session 22 traction quick wins — built, LIVE CHECKS PENDING:** vault-wide recall (top-20 full + titles index, `lib/ai/vaultContext.ts`), persona carve-outs (recall + shopping asks engage; tasks/code still deflect), opt-in ndjson streaming, You-node bloom, share-my-graph PNG. Owner live checks: streamed turn + reload persistence, 3 persona probes, fresh-vault bloom, share PNG, one mobile turn. Opener-card client drop fixed → scout live test (item 7) unblocked. Extraction now dedups against whole-vault titles — watch `refines` quality next live extraction test. Review: `docs/reviews/2026-07-11-traction-review.md`; plan: `docs/superpowers/plans/2026-07-11-traction-quick-wins.md`. Still to build before shipping (owner decision): push notifications + email reminders.
 
 ## Extraction & interviewer rules
 The detailed extraction rules (entity types, tiers, gravity agenda, containment) and interviewer rules (agenda injection, attribute grouping, deflection, session-end) live in **[docs/engineering-canon.md](docs/engineering-canon.md)** — moved out of this file to keep session context lean. Read that doc before extraction or persona work.
@@ -115,18 +116,20 @@ apps/web/
 │   ├── marketing/                  ← landing page (Landing, DemoGraph, ConsentPanel, TalkDemo, GrowthTimeline, Nav, Reveal, graphData)
 │   ├── menu/UserMenu.tsx           ← avatar chip → slide-over drawer: Profile, Graph settings, Manage nodes, Export, Logout
 │   └── chat/
-│       ├── ChatPanel.tsx           ← AI chat overlay (onReply callback)
+│       ├── ChatPanel.tsx           ← AI chat overlay (onReply callback; reads ndjson streams, typewriter for JSON replies)
 │       └── AdCard.tsx              ← offer card, kind: "ad" | "scout" (scout = "Local find")
 ├── lib/
 │   ├── supabase/client.ts          ← browser client
 │   ├── supabase/server.ts          ← SSR client
 │   ├── supabase/admin.ts           ← service role (server-only)
 │   ├── graph/palettes.ts           ← node-color source of truth: topic map + 4 palette modes + backgrounds + localStorage settings
+│   ├── graph/shareImage.ts         ← share-my-graph: SVG → 2x PNG (wordmark) → native share sheet or download
 │   ├── graph/reconcile.ts          ← Gardener: whole-graph batch cleanup (merge/retype/add_edge/drop), dry-run default, soft-delete via archived_at (run: scripts/reconcile.ts, --apply to mutate)
 │   ├── profile/currentLocation.ts  ← shared 30-day current_location TTL (isCurrentLocationFresh) — used by scout + graph You-linking
 │   ├── scout/                      ← scout digest: sources.ts (Ticketmaster/Bandsintown), getScoutFind.ts (48h gate + city cache, admin-only)
 │   └── ai/
 │       ├── synthesize.ts           ← extraction pass, Gemini 2.5 Flash primary + Cerebras fallback (strict json_schema) — feeds extractFacts; runs async off the chat turn
+│       ├── vaultContext.ts         ← interviewer vault window: top-20 relevant notes full + titles-only index of the rest (check: scripts/check-vault-context.ts)
 │       ├── extract.ts              ← extractFacts: agenda gravity + vault writes (now fed by synthesize.ts, no longer LLM-coupled)
 │       ├── entityTypes.ts          ← 7 entity types with tier 1/2/3 parameter stacks (source of truth for extraction)
 │       ├── checklists.ts           ← AgendaItem/Agenda types, CHECKLIST_PROMPT (tiered)
