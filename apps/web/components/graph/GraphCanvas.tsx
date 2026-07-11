@@ -387,9 +387,15 @@ export default function GraphCanvas({ initialData, refreshTrigger, settings = DE
           .transition().duration(1600).ease(d3.easeSinInOut).attr("opacity", 0.1)
           .on("end", function () { breathe(d3.select(this as SVGCircleElement) as d3.Selection<SVGCircleElement, GraphNode, d3.BaseType, unknown>) })
       }
-      breathe(glows)
+      // Don't restart the cycle on every render (refreshTrigger polls) — only start if idle.
+      const el = glows.node()
+      if (el && !d3.active(el, "breathe")) breathe(glows)
     } else {
-      glows.interrupt("breathe").attr("opacity", 0.1)
+      // interrupt is name-scoped (no-op for glows that never breathed); the opacity reset
+      // must skip nodes born THIS render — their unnamed pulse reads its start value on the
+      // next tick, and a synchronous 0.1 write here would neuter the birth flash.
+      glows.interrupt("breathe")
+      glows.filter((d) => !isNew(d.id)).attr("opacity", 0.1)
     }
 
     // Remember what we've drawn so only truly-new nodes animate next time
