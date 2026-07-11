@@ -164,6 +164,22 @@ function ndjsonResponse(upstream: ReadableStream<Uint8Array>, resolveFinal: (rep
             } catch { /* non-JSON keepalive line — skip */ }
           }
         }
+        // Flush the decoder and process any final unterminated SSE line — relying on
+        // upstream newline framing would silently truncate the persisted reply.
+        buf += decoder.decode()
+        const tail = buf.trim()
+        if (tail.startsWith("data:")) {
+          const payload = tail.slice(5).trim()
+          if (payload && payload !== "[DONE]") {
+            try {
+              const text = JSON.parse(payload)?.candidates?.[0]?.content?.parts?.[0]?.text
+              if (text) {
+                full += text
+                controller.enqueue(encoder.encode(JSON.stringify({ t: text }) + "\n"))
+              }
+            } catch { /* torn tail — skip */ }
+          }
+        }
         // Empty stream = provider hiccup: signal error instead of persisting nothing —
         // the non-stream path treats an empty reply as a failure too.
         if (full.trim()) {
@@ -178,7 +194,7 @@ function ndjsonResponse(upstream: ReadableStream<Uint8Array>, resolveFinal: (rep
         resolveFinal(null)
         controller.enqueue(encoder.encode(JSON.stringify({ error: true }) + "\n"))
       } finally {
-        controller.close()
+        try { controller.close() } catch { /* already errored/cancelled */ }
       }
     },
   })
@@ -645,14 +661,6 @@ export async function POST(req: NextRequest) {
     if (isFarewell) {
       await supabase.from("conversations").update({ status: "completed" }).eq("id", conversationId)
     }
-    // Fire-once: these dated events were injected into this turn's prompt — mark them
-    // so they're raised exactly once (RLS "vault_notes: own" covers this update).
-    if (todayEvents?.length) {
-      await supabase
-        .from("vault_notes")
-        .update({ event_prompted_at: new Date().toISOString() })
-        .in("id", todayEvents.map((e) => e.id))
-    }
     // Extraction: separate structured pass over the recent window — never coupled to the
     // conversational reply. Skipped during onboarding. (Already post-response here.)
     if (!isOnboarding) {
@@ -668,6 +676,17 @@ export async function POST(req: NextRequest) {
     const reply = await finalReply
     if (reply != null) await finishTurn(reply)
   })
+
+  // Fire-once: mark injected dated events BEFORE any response is produced — leaving this
+  // to the post-response after() opens a window where a fast next request re-injects the
+  // same event. Matches pre-streaming timing (marked only on turns with a user message).
+  const hasUserTurn = messages.some((m) => m.role === "user")
+  if (hasUserTurn && todayEvents?.length) {
+    await supabase
+      .from("vault_notes")
+      .update({ event_prompted_at: new Date().toISOString() })
+      .in("id", todayEvents.map((e) => e.id))
+  }
 
   // ── Streaming path (opt-in; web client only) ──────────────────────────────
   // Never streams: onboarding (JSON schema contract) or a scout-card opener (card rides

@@ -68,7 +68,7 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
       body: JSON.stringify({ messages: [], userId }),
     })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then(({ reply }) => { setCurrentAi(reply); setAiVisible(true) })
+      .then(({ reply, card: openerCard }) => { setCurrentAi(reply); setCard(openerCard ?? null); setAiVisible(true) })
       .catch(() => { setCurrentAi("Hey — what have you been up to today?"); setAiVisible(true) })
       .finally(() => setLoading(false))
   }, [userId, seeded])
@@ -116,6 +116,7 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
       if (ct.includes("application/x-ndjson") && res.body) {
         // Real stream: append chunks as they arrive; typewriter stays out of the way.
         setStreamMode(true)
+        setCurrentAi("")
         setStreamDone(false)
         setLoading(false)
         setAiVisible(true)
@@ -141,7 +142,9 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
           lines.forEach(handleLine)
         }
         handleLine(buf)
-        if (!acc) setCurrentAi("Something slipped on my end — want to try that again?") // errored or empty stream
+        // A mid-stream error means the server persisted nothing — don't present the
+        // partial text as a completed reply the DB will never have.
+        if (errored || !acc) setCurrentAi("Something slipped on my end — want to try that again?")
         setStreamDone(true)
         setCanInput(true)
         onReply?.()
