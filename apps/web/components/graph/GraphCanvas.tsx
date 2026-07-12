@@ -419,7 +419,7 @@ export default function GraphCanvas({ initialData, refreshTrigger, settings = DE
     simulation.nodes(nodes)
     simulation.force<d3.ForceLink<GraphNode, GraphLink>>("link")?.links(links)
     simulation.alpha(zoomTransformRef.current ? 0.3 : 1).restart()
-  }, [graphData, palette])
+  }, [graphData, palette, identityPlaces])
 
   useEffect(() => {
     render()
@@ -449,7 +449,7 @@ export default function GraphCanvas({ initialData, refreshTrigger, settings = DE
         })),
       })
     }
-    const timers = [setTimeout(fetchGraph, 3000), setTimeout(fetchGraph, 6500)]
+    const timers = [setTimeout(fetchGraph, 250), setTimeout(fetchGraph, 3000), setTimeout(fetchGraph, 6500)]
     return () => timers.forEach(clearTimeout)
   }, [refreshTrigger])
 

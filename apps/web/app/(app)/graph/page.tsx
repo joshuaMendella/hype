@@ -13,7 +13,7 @@ export default async function GraphPage() {
   const [{ data: notes }, { data: links }, { data: profile }] = await Promise.all([
     supabase.from("vault_notes").select("id, title, topic, path, content_md, intent, source, entity_type").is("archived_at", null),
     supabase.from("vault_links").select("id, source_note_id, target_note_id, anchor_text, link_type"),
-    supabase.from("profiles").select("display_name, base_profile").eq("id", user.id).single(),
+    supabase.from("profiles").select("display_name, base_profile, onboarded").eq("id", user.id).single(),
   ])
 
   const userName: string | null = user.user_metadata?.display_name ?? null
@@ -69,6 +69,7 @@ export default async function GraphPage() {
         userName={userName}
         initialProfile={{ display_name: profile?.display_name ?? userName, base_profile: profile?.base_profile ?? {} }}
         initialHistory={initialHistory}
+        onboarded={profile?.onboarded ?? true}
       />
     </div>
   )
