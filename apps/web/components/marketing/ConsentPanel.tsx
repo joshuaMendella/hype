@@ -68,7 +68,7 @@ export default function ConsentPanel() {
               </div>
             </div>
             <p className="mt-3 text-center text-xs text-white/40">
-              One suggestion, clearly labeled, because you asked. That&apos;s the whole idea.
+              One find, clearly labeled, because you asked. That&apos;s the whole idea.
             </p>
           </div>
         )}

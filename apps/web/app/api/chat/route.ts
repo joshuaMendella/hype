@@ -37,7 +37,7 @@ const ZARA_AD: AdCard = {
   image: "/zara-shirt.jpg",
   url: "https://www.zara.com/us/en/man-shirts-l737.html",
 }
-const AD_CONSENT_LINE = "Quick one — I've got a shirt offer from Zara. Want a look? Totally fine to skip."
+const AD_CONSENT_LINE = "Quick one — I found a shirt at Zara I think you'd like. Want a look? Totally fine to skip."
 const AD_INTRO_TEXT = "Here it is — tap the card for the full details on Zara's site."
 const AD_DECLINE_LINE = "No problem."
 

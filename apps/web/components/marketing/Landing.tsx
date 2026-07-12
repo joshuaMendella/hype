@@ -211,7 +211,7 @@ export default function Landing() {
             {[
               { i: "◎", h: "Tailored to you", b: "Because it genuinely knows you, what it brings is relevant in a way guesswork can't touch. No creepy tracking." },
               { i: "✋", h: "Only if you ask", b: "Nothing is ever pushed. It asks first, every time — say yes and it appears, say no and the conversation just moves on." },
-              { i: "◉", h: "Fully in the open", b: "It's your graph. You see everything it knows, switch any of it off, and that openness is why it's free." },
+              { i: "◉", h: "Nothing behind your back", b: "It's your graph. Everything Hype knows sits right in front of you — see it, correct it, delete it. No hidden profile. No guessing how it knew." },
             ].map((c) => (
               <div
                 key={c.h}

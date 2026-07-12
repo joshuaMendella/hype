@@ -7,7 +7,7 @@ export const onboardingCopy = {
   howto:
     "See that lone dot behind this chat? That's you, day one. Everything you tell me becomes part of that map — quietly, while we just talk. But first, the honest bit about how this works.",
   consentIntro:
-    "Here's the deal up front: Hype's free, and it stays free because once I really know you, I'll occasionally spot something hyper-tailored — a price drop, a show near you, a thing you actually wanted. I never just show it. I ask first, like this:",
+    "One more thing you should know about me: once I really know you, I'll start spotting finds you'd genuinely want — a price drop on the thing you've been eyeing, your favorite band playing two towns over. But I never just show up with them. I ask first, every single time, and no costs you nothing. It looks like this:",
   consentTrailing:
     "You say yes or no, every single time. No toggle buried in settings — just me, asking. Fair deal?",
   exampleAsk:
