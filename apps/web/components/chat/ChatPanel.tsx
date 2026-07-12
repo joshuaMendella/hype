@@ -3,8 +3,8 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 import AdCardView, { type AdCard } from "./AdCard"
 import ExampleConsentCard from "./ExampleConsentCard"
-import { onboardingCopy } from "@/lib/onboarding/script"
-import { seedLocationNode, seedWorkNode, completeOnboarding } from "@/lib/onboarding/seed"
+import { onboardingCopy, onboardingPlaceholder } from "@/lib/onboarding/script"
+import { completeOnboarding } from "@/lib/onboarding/seed"
 
 interface ChatMessage {
   role: "user" | "assistant"
@@ -66,6 +66,9 @@ export default function ChatPanel({ userId, userName, initialHistory = [], onRep
   const [obStep, setObStep] = useState<ObStep>(startInOnboarding ? "welcome" : "interview")
   const histAfterWorkRef = useRef<ChatMessage[]>([])
   const handoffRef = useRef(false)
+  const [showConsentCard, setShowConsentCard] = useState(false)
+  const [showConsentTrailing, setShowConsentTrailing] = useState(false)
+  const workRetriedRef = useRef(false)
   const onboarding = obStep !== "interview"
   const inputRef = useRef<HTMLInputElement>(null)
   const { displayed, done } = useTypewriter(streamMode ? "" : currentAi)
@@ -93,8 +96,23 @@ export default function ChatPanel({ userId, userName, initialHistory = [], onRep
   }, [userId, seeded, startInOnboarding, userName])
 
   useEffect(() => {
-    if (done) setCanInput(true)
-  }, [done])
+    if (done && obStep !== "consent") setCanInput(true)
+  }, [done, obStep])
+
+  // Consent beat: reveal the example card after the line finishes printing (+400ms), then
+  // the trailing "you say yes or no" line (+1.2s), which is what unlocks input. Card is the
+  // payoff of "…like this:" — it must arrive as a reveal, never alongside the text.
+  useEffect(() => {
+    if (obStep !== "consent") { setShowConsentCard(false); setShowConsentTrailing(false); return }
+    if (!shownDone) return
+    const t1 = setTimeout(() => setShowConsentCard(true), 400)
+    const t2 = setTimeout(() => setShowConsentTrailing(true), 1600)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+  }, [obStep, shownDone])
+
+  useEffect(() => {
+    if (showConsentTrailing) setCanInput(true)
+  }, [showConsentTrailing])
 
   useEffect(() => {
     if (canInput) inputRef.current?.focus()
@@ -127,24 +145,44 @@ export default function ChatPanel({ userId, userName, initialHistory = [], onRep
       const next = withTurn()
       setHistory(next)
       setLoading(true)
+      let cityTitle = text.trim()
       try {
-        const city = await seedLocationNode(userId, text)
-        onLocationSeeded?.(city)
-      } catch { /* seeding failed — still advance; the flow must not stall */ }
-      onReply?.() // refresh the graph so the Place node pops
+        const r = await fetch("/api/onboarding/seed", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind: "location", answer: text }),
+        })
+        const d = await r.json().catch(() => ({}))
+        if (d?.title) cityTitle = d.title
+      } catch { /* seeding failed — still advance with the raw answer */ }
+      onLocationSeeded?.(cityTitle) // place links to You only if its title is in identityPlaces
+      onReply?.() // refresh so the Place node pops
       setLoading(false)
-      setCurrentAi(onboardingCopy.askWork); setObStep("work"); setAiVisible(true); return
+      setCurrentAi(onboardingCopy.askWork(cityTitle)); setObStep("work"); setAiVisible(true); return
     }
     if (obStep === "work") {
       const next = withTurn()
       setHistory(next)
-      histAfterWorkRef.current = next // handoff replays this to the interviewer for beat 7
       setLoading(true)
+      const force = workRetriedRef.current
+      let low = false
       try {
-        await seedWorkNode(userId, text)
-      } catch { /* see above */ }
-      onReply?.() // refresh so the Org node pops alongside the Place node
+        const r = await fetch("/api/onboarding/seed", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind: "work", answer: text, force }),
+        })
+        const d = await r.json().catch(() => ({}))
+        low = d?.lowConfidence === true
+      } catch { /* seeding failed — treat as committed, don't stall */ }
       setLoading(false)
+      // Vague first answer → one in-voice clarifier, stay on the work beat (nothing seeded yet).
+      if (low && !force) {
+        workRetriedRef.current = true
+        setCurrentAi(onboardingCopy.workRetry); setAiVisible(true); return
+      }
+      histAfterWorkRef.current = next // handoff replays this to the interviewer for beat 7
+      onReply?.() // node written → refresh so the Org/Interest node pops
       setCurrentAi(onboardingCopy.confirm); setObStep("confirm"); setAiVisible(true); return
     }
   }, [obStep, history, currentAi, userId, onReply, onLocationSeeded])
@@ -285,6 +323,10 @@ export default function ChatPanel({ userId, userName, initialHistory = [], onRep
     ? "rgba(255,255,255,0.22)"
     : "transparent"
 
+  const inputPlaceholder = onboarding
+    ? (onboardingPlaceholder[obStep] ?? "")
+    : "your answer… [notes in brackets]"
+
   return (
     <div className="fixed inset-0 z-30 flex flex-col pointer-events-none select-none">
       {/* ── AI voice — top center ─────────────────────────────────────── */}
@@ -332,9 +374,26 @@ export default function ChatPanel({ userId, userName, initialHistory = [], onRep
       {/* ── Graph shows through here / ad card sits mid-screen ─────────── */}
       <div className="flex-1 flex items-center justify-center">
         {obStep === "consent" ? (
-          <div className="pointer-events-none">
-            <ExampleConsentCard ask={onboardingCopy.exampleAsk} />
-          </div>
+          showConsentCard && (
+            <div className="pointer-events-none flex flex-col items-center gap-4">
+              <ExampleConsentCard ask={onboardingCopy.exampleAsk} />
+              <p
+                style={{
+                  fontFamily: "var(--font-poppins), sans-serif",
+                  fontSize: "clamp(0.95rem, 1.7vw, 1.1rem)",
+                  fontWeight: 300,
+                  lineHeight: 1.6,
+                  color: "rgba(255,255,255,0.7)",
+                  textAlign: "center",
+                  maxWidth: "360px",
+                  opacity: showConsentTrailing ? 1 : 0,
+                  transition: "opacity 0.5s ease",
+                }}
+              >
+                {onboardingCopy.consentTrailing}
+              </p>
+            </div>
+          )
         ) : (
           card && (
             <div className="pointer-events-auto">
@@ -397,7 +456,7 @@ export default function ChatPanel({ userId, userName, initialHistory = [], onRep
                 onFocus={() => setFocused(true)}
                 onBlur={() => setFocused(false)}
                 disabled={!canInput}
-                placeholder={canInput ? "your answer… [notes in brackets]" : ""}
+                placeholder={canInput ? inputPlaceholder : ""}
                 autoComplete="off"
                 spellCheck={false}
                 className="select-auto"
