@@ -2,6 +2,9 @@
 
 import { useState, useRef, useEffect, useCallback } from "react"
 import AdCardView, { type AdCard } from "./AdCard"
+import ExampleConsentCard from "./ExampleConsentCard"
+import { onboardingCopy } from "@/lib/onboarding/script"
+import { seedLocationNode, seedWorkNode, completeOnboarding } from "@/lib/onboarding/seed"
 
 interface ChatMessage {
   role: "user" | "assistant"
@@ -35,7 +38,9 @@ function useTypewriter(text: string, speed = 85) {
   return { displayed, done }
 }
 
-export default function ChatPanel({ userId, userName: _userName, initialHistory = [], onReply }: { userId: string; userName: string | null; initialHistory?: ChatMessage[]; onReply?: () => void }) {
+type ObStep = "welcome" | "howto" | "consent" | "location" | "work" | "confirm" | "interview"
+
+export default function ChatPanel({ userId, userName, initialHistory = [], onReply, onboarded = true, onLocationSeeded }: { userId: string; userName: string | null; initialHistory?: ChatMessage[]; onReply?: () => void; onboarded?: boolean; onLocationSeeded?: (city: string) => void }) {
   // Restore an active (<2h) conversation on reload: seed prior turns so the model keeps context,
   // and show the last AI line where we left off. One message at a time — no scrollback. Messages
   // are always saved user→assistant pairs, so the last is the AI's line: split it out as currentAi.
@@ -43,6 +48,9 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
   const seedAi = lastMsg?.role === "assistant" ? lastMsg.content : ""
   const seeded = seedAi !== ""
   const seedHistory = seeded ? initialHistory.slice(0, -1) : initialHistory
+  // Onboarding runs only for a brand-new user with no restored conversation. Beats 1–6 are
+  // client-side (no /api/chat); beat 7 is the live interviewer after the flag flips.
+  const startInOnboarding = !onboarded && !seeded
 
   const [history, setHistory] = useState<ChatMessage[]>(seedHistory)
   const [currentAi, setCurrentAi] = useState(seedAi)
@@ -55,6 +63,10 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
   // Current message arrived via stream → bypass the typewriter (text is already incremental).
   const [streamMode, setStreamMode] = useState(false)
   const [streamDone, setStreamDone] = useState(true)
+  const [obStep, setObStep] = useState<ObStep>(startInOnboarding ? "welcome" : "interview")
+  const histAfterWorkRef = useRef<ChatMessage[]>([])
+  const handoffRef = useRef(false)
+  const onboarding = obStep !== "interview"
   const inputRef = useRef<HTMLInputElement>(null)
   const { displayed, done } = useTypewriter(streamMode ? "" : currentAi)
   const shownText = streamMode ? currentAi : displayed
@@ -62,6 +74,13 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
 
   useEffect(() => {
     if (seeded) return // restored an active conversation — show where we left off, no opener fetch
+    if (startInOnboarding) {
+      // Beat 1 — no network. currentAi is the first scripted line; typewriter → canInput.
+      setCurrentAi(onboardingCopy.welcome(userName ?? "there"))
+      setAiVisible(true)
+      setLoading(false)
+      return
+    }
     fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -71,7 +90,7 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
       .then(({ reply, card: openerCard }) => { setCurrentAi(reply); setCard(openerCard ?? null); setAiVisible(true) })
       .catch(() => { setCurrentAi("Hey — what have you been up to today?"); setAiVisible(true) })
       .finally(() => setLoading(false))
-  }, [userId, seeded])
+  }, [userId, seeded, startInOnboarding, userName])
 
   useEffect(() => {
     if (done) setCanInput(true)
@@ -80,6 +99,86 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
   useEffect(() => {
     if (canInput) inputRef.current?.focus()
   }, [canInput])
+
+  // Advance the scripted onboarding one beat per user reply. Beats 1–3 ignore the reply
+  // text (any ack advances); beats 4–5 seed a graph node from it; then confirm + handoff.
+  const sendOnboarding = useCallback(async (text: string) => {
+    setCanInput(false)
+    setInput("")
+    setAiVisible(false)
+
+    // Keep the transcript so the interviewer has context at handoff.
+    const withTurn = (): ChatMessage[] => [
+      ...history,
+      { role: "assistant", content: currentAi },
+      { role: "user", content: text },
+    ]
+
+    if (obStep === "welcome") {
+      setHistory(withTurn()); setCurrentAi(onboardingCopy.howto); setObStep("howto"); setAiVisible(true); return
+    }
+    if (obStep === "howto") {
+      setHistory(withTurn()); setCurrentAi(onboardingCopy.consentIntro); setObStep("consent"); setAiVisible(true); return
+    }
+    if (obStep === "consent") {
+      setHistory(withTurn()); setCurrentAi(onboardingCopy.askLocation); setObStep("location"); setAiVisible(true); return
+    }
+    if (obStep === "location") {
+      const next = withTurn()
+      setHistory(next)
+      setLoading(true)
+      try {
+        const city = await seedLocationNode(userId, text)
+        onLocationSeeded?.(city)
+      } catch { /* seeding failed — still advance; the flow must not stall */ }
+      onReply?.() // refresh the graph so the Place node pops
+      setLoading(false)
+      setCurrentAi(onboardingCopy.askWork); setObStep("work"); setAiVisible(true); return
+    }
+    if (obStep === "work") {
+      const next = withTurn()
+      setHistory(next)
+      histAfterWorkRef.current = next // handoff replays this to the interviewer for beat 7
+      setLoading(true)
+      try {
+        await seedWorkNode(userId, text)
+      } catch { /* see above */ }
+      onReply?.() // refresh so the Org node pops alongside the Place node
+      setLoading(false)
+      setCurrentAi(onboardingCopy.confirm); setObStep("confirm"); setAiVisible(true); return
+    }
+  }, [obStep, history, currentAi, userId, onReply, onLocationSeeded])
+
+  // After the confirm beat is read, flip the flag and let the real interviewer produce
+  // beat 7 from the seeded facts. Runs once. completeOnboarding MUST precede the fetch so
+  // the route takes the interview path, never the (now-deleted) onboarding path.
+  useEffect(() => {
+    if (obStep !== "confirm" || !done || handoffRef.current) return
+    handoffRef.current = true
+    const t = setTimeout(async () => {
+      setAiVisible(false)
+      setLoading(true)
+      try {
+        await completeOnboarding(userId)
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: histAfterWorkRef.current, userId }),
+        })
+        const { reply } = res.ok ? await res.json() : { reply: "So — what's your day been like?" }
+        setHistory(histAfterWorkRef.current)
+        setCurrentAi(reply ?? "So — what's your day been like?")
+      } catch {
+        setHistory(histAfterWorkRef.current)
+        setCurrentAi("So — what's your day been like?")
+      } finally {
+        setObStep("interview")
+        setLoading(false)
+        setAiVisible(true)
+      }
+    }, 900) // let the graph animation + confirm line land before the interviewer speaks
+    return () => clearTimeout(t)
+  }, [obStep, done, userId])
 
   const send = useCallback(async () => {
     const text = input.trim()
@@ -166,10 +265,17 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
     }
   }, [input, loading, canInput, history, currentAi, userId])
 
+  const submit = useCallback(() => {
+    const text = input.trim()
+    if (!text || loading || !canInput) return
+    if (onboarding) { void sendOnboarding(text); return }
+    void send()
+  }, [input, loading, canInput, onboarding, sendOnboarding, send])
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter") {
       e.preventDefault()
-      send()
+      submit()
     }
   }
 
@@ -225,10 +331,16 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
 
       {/* ── Graph shows through here / ad card sits mid-screen ─────────── */}
       <div className="flex-1 flex items-center justify-center">
-        {card && (
-          <div className="pointer-events-auto">
-            <AdCardView card={card} />
+        {obStep === "consent" ? (
+          <div className="pointer-events-none">
+            <ExampleConsentCard ask={onboardingCopy.exampleAsk} />
           </div>
+        ) : (
+          card && (
+            <div className="pointer-events-auto">
+              <AdCardView card={card} />
+            </div>
+          )
         )}
       </div>
 
@@ -307,7 +419,7 @@ export default function ChatPanel({ userId, userName: _userName, initialHistory 
               />
               {canInput && input.trim() && (
                 <button
-                  onClick={send}
+                  onClick={submit}
                   style={{
                     position: "absolute",
                     right: 0,
