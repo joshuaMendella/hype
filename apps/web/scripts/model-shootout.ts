@@ -112,7 +112,7 @@ const AGENDA: Agenda = {
 // ─── chat system prompt, read live from route.ts ─────────────────────────────
 function chatSystemPrompt(): string {
   const routeTxt = readFileSync(resolve(process.cwd(), "app/api/chat/route.ts"), "utf8")
-  const m = routeTxt.match(/const SYSTEM_PROMPT = `([\s\S]*?)`\r?\n\r?\nconst ONBOARDING_PROMPT/)
+  const m = routeTxt.match(/const SYSTEM_PROMPT = `([\s\S]*?)`\r?\n\r?\n(?:\/\/[^\n]*\r?\n)*const REPLY_GUTCHECK/)
   if (!m) throw new Error("Could not extract SYSTEM_PROMPT from route.ts")
   const persona = m[1].replace("${CHECKLIST_PROMPT}", CHECKLIST_PROMPT)
   // representative context tail (identical for both models — fairness)
