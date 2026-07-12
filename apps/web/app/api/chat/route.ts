@@ -59,7 +59,7 @@ function classifyAdReply(content: string): "yes" | "no" | "ambiguous" {
   return "ambiguous"
 }
 
-async function geminiChat(system: string, history: ChatMsg[], jsonSchema?: object): Promise<string> {
+async function geminiChat(system: string, history: ChatMsg[]): Promise<string> {
   if (!GEMINI_KEY) throw new Error("GEMINI_API_KEY not set")
   const contents = history.map((m) => ({
     role: m.role === "assistant" ? "model" : "user",
@@ -70,10 +70,6 @@ async function geminiChat(system: string, history: ChatMsg[], jsonSchema?: objec
   // of always failing over to Cerebras. (Cerebras accepts a system-only message; Gemini won't.)
   if (contents.length === 0) contents.push({ role: "user", parts: [{ text: "(Start the conversation.)" }] })
   const generationConfig: Record<string, unknown> = { temperature: 0.8, thinkingConfig: { thinkingBudget: 0 }, maxOutputTokens: 512 }
-  // Onboarding passes a schema so Gemini returns a guaranteed-parseable {reply, onboarding_complete}.
-  // Without it the model drifts to prose, the completion signal is lost, onboarded never flips true,
-  // and every turn stays on the onboarding path — so extraction never runs. Interview path passes none.
-  if (jsonSchema) { generationConfig.responseMimeType = "application/json"; generationConfig.responseSchema = jsonSchema }
   const res = await fetch(`${GEMINI_CHAT_URL}?key=${GEMINI_KEY}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -203,18 +199,6 @@ function ndjsonResponse(upstream: ReadableStream<Uint8Array>, resolveFinal: (rep
   })
 }
 
-// Gemini structured-output schema for the onboarding turn (uppercase OpenAPI-subset types,
-// same shape synthesize.ts uses). Forces {reply, onboarding_complete} so the completion signal
-// is never lost to prose. extraction is omitted deliberately — onboarding never extracts.
-const ONBOARDING_SCHEMA = {
-  type: "OBJECT",
-  properties: {
-    reply: { type: "STRING" },
-    onboarding_complete: { type: "BOOLEAN" },
-  },
-  required: ["reply", "onboarding_complete"],
-}
-
 const SYSTEM_PROMPT = `You are a curious friend catching up with someone over text. You genuinely want to know how their life is going — what they're into, what they've been up to, what matters to them. As they talk, you quietly remember the details. You are openly an AI building their personal vault (they were told this at onboarding), so you never have to act covert — you just have to be good company.
 
 ## The core move: harvest, don't interrogate
@@ -332,41 +316,6 @@ You're an AI — don't pretend otherwise if asked. But don't volunteer it either
 
 ## Response format
 Reply with a single short plain-text message — usually a brief reaction plus one question, but per the Rhythm rule you may sometimes just react, or offer a light thought, without a question. Keep it to one question, or at most a natural pair that reads as one thought — never a stack of separate asks. No JSON, no labels, no formatting. (Fact extraction happens in a separate pass; you only converse.)`
-
-const ONBOARDING_PROMPT = `You are welcoming a new user to their personal vault for the first time. Walk them through what this is, one short message at a time, waiting for their acknowledgment before continuing.
-
-Non-negotiable rules during onboarding:
-- One short message per turn. No interview questions until step 5.
-- Wait for the user to respond before sending the next step.
-- Warm, casual tone — like showing a friend around your place, not giving a product demo.
-- Never use bullet lists or long explanations.
-
-Follow this sequence based on the conversation history so far:
-
-Step 1 — if this is the very first message (no prior history):
-"Hey [name]! Welcome to your vault. Give me just a second to walk you through how this works — sound good?"
-
-Step 2 — after user acknowledges step 1:
-"I'm here to learn about you — what you're into, your habits, what you've been up to. We'll just talk, and I'll ask you some questions along the way."
-
-Step 3 — after user acknowledges step 2:
-"Everything you share builds out your vault — you'll actually see it grow as we chat. And the more I know, the better I can surface stuff that's relevant to you — news, deals, recommendations that actually make sense for you."
-
-Step 4 — after user acknowledges step 3:
-"It's all on your terms. Share what you want, skip what you don't — no pressure. Ready to start?"
-
-Step 5 — after user says yes, let's go, or any confirmation:
-Give a warm one-liner to kick things off, then ask your first open-ended question about their day or recent activities. Set onboarding_complete to true.
-
-If the user explicitly asks to skip the intro ("skip this", "I know", "just start already"), jump straight to Step 5. Otherwise, a simple acknowledgment ("sure", "okay", "let's do it") just advances to the next step.
-
-## Response format — ALWAYS return valid JSON only. No other text.
-{
-  "reply": "your message to the user",
-  "extraction": { "attributes": [], "entities": [] },
-  "onboarding_complete": false
-}
-Set onboarding_complete to true only on Step 5 when the user confirms they are ready to start.`
 
 // Short recap of the rules that break most (per session 7–12 live reviews), positioned last
 // so it's freshest at generation. Don't grow this — a long recap defeats the point.
@@ -506,8 +455,6 @@ export async function POST(req: NextRequest) {
       .single(),
   ])
 
-  const isOnboarding = profile?.onboarded === false
-
   // ── Ad moment short-circuit (draft) — bypasses the interviewer entirely; ──
   // never runs extraction, never touches the vault.
   const adLastUserMsg = messages.findLast((m) => m.role === "user")
@@ -522,13 +469,13 @@ export async function POST(req: NextRequest) {
     ])
   }
 
-  if (hasAdMarker && !isOnboarding && adLastUserMsg) {
+  if (hasAdMarker && adLastUserMsg) {
     // Stored raw, WITH the marker — same pattern as other [reviewer annotations].
     await persistAdTurn(adLastUserMsg.content, AD_CONSENT_LINE)
     return NextResponse.json({ reply: AD_CONSENT_LINE })
   }
 
-  if (inAdProposed && !isOnboarding && adLastUserMsg) {
+  if (inAdProposed && adLastUserMsg) {
     const verdict = classifyAdReply(adLastUserMsg.content)
     if (verdict === "yes") {
       await persistAdTurn(adLastUserMsg.content, AD_INTRO_TEXT)
@@ -591,7 +538,7 @@ export async function POST(req: NextRequest) {
   // last conversation exceeds 48h — never mid-conversation. getScoutFind owns the
   // scout_cache lookup + a >48h re-show dedupe guard; a miss/timeout/error resolves
   // to null and the opener behaves exactly as it does today.
-  const isWelcomeBack = isOpeningMessage && !isOnboarding && !!recent?.updated_at &&
+  const isWelcomeBack = isOpeningMessage && !!recent?.updated_at &&
     Date.now() - new Date(recent.updated_at).getTime() > FORTY_EIGHT_HOURS_MS
   const scoutFind = isWelcomeBack
     ? await getScoutFind(
@@ -607,22 +554,20 @@ export async function POST(req: NextRequest) {
     ? `\n\n## A local find for your opener (facts are locked — quote exactly, never alter or invent a date/venue):\n- "${scoutFind.title}" — ${scoutFind.date} at ${scoutFind.venue}\nOpen with one short, warm line referencing this find (the full details ride in a card the user will see below your message — no need to repeat the link), then continue into your normal opening question.`
     : ""
 
-  const systemPrompt = isOnboarding
-    ? ONBOARDING_PROMPT.replace("[name]", profile?.display_name ?? "there")
-    : [
-        SYSTEM_PROMPT,
-        vaultContext ? `## What you already know about this person (already captured — weave it in, never re-ask it):\n${vaultContext}` : "",
-        incompleteThreads ? `## Unfinished from last session — pick these up naturally when relevant:\n${incompleteThreads}` : "",
-        todayContext,
-        scoutContext,
-        sessionContext,
-        baseProfileNudge,
-        buildAgendaContext(agenda),
-        // Closing recap: the persona rules above compete with a wall of facts, and the facts
-        // are the freshest thing the model reads before generating. Re-state the 4 most-broken
-        // rules right at the generation point (recency) so they win the tie.
-        REPLY_GUTCHECK,
-      ].filter(Boolean).join("\n\n")
+  const systemPrompt = [
+    SYSTEM_PROMPT,
+    vaultContext ? `## What you already know about this person (already captured — weave it in, never re-ask it):\n${vaultContext}` : "",
+    incompleteThreads ? `## Unfinished from last session — pick these up naturally when relevant:\n${incompleteThreads}` : "",
+    todayContext,
+    scoutContext,
+    sessionContext,
+    baseProfileNudge,
+    buildAgendaContext(agenda),
+    // Closing recap: the persona rules above compete with a wall of facts, and the facts
+    // are the freshest thing the model reads before generating. Re-state the 4 most-broken
+    // rules right at the generation point (recency) so they win the tie.
+    REPLY_GUTCHECK,
+  ].filter(Boolean).join("\n\n")
 
   // strip [reviewer annotations] from user turns — stored raw in DB, invisible to LLM.
   // Ad-flow turns are filtered out first so the interviewer never sees the ad exchange.
@@ -640,7 +585,6 @@ export async function POST(req: NextRequest) {
   // resolveFinal (null = nothing to persist), or the after() callback would hang.
   let resolveFinal: (reply: string | null) => void = () => {}
   const finalReply = new Promise<string | null>((r) => { resolveFinal = r })
-  let onboardingComplete = false
 
   async function finishTurn(reply: string) {
     if (!user) return // narrows for TS within this closure; already checked above
@@ -655,21 +599,16 @@ export async function POST(req: NextRequest) {
       { conversation_id: conversationId, role: "user", content: lastUserMsg.content },
       { conversation_id: conversationId, role: "assistant", content: reply },
     ])
-    if (onboardingComplete) {
-      await supabase.from("profiles").update({ onboarded: true }).eq("id", user.id)
-    }
     if (isFarewell) {
       await supabase.from("conversations").update({ status: "completed" }).eq("id", conversationId)
     }
     // Extraction: separate structured pass over the recent window — never coupled to the
-    // conversational reply. Skipped during onboarding. (Already post-response here.)
-    if (!isOnboarding) {
-      const messagesForExtraction = messages.filter((m) => !isAdFlowMessage(m))
-      await synthesize(messagesForExtraction, agenda, vaultNotes ?? [])
-        .then((extraction) => extractFacts(conversationId, user.id, extraction))
-        .then(() => (isFarewell ? closeSession(conversationId, user.id).then(() => {}) : undefined))
-        .catch((err) => console.error("[chat] extraction failed:", err))
-    }
+    // conversational reply. (Already post-response here.)
+    const messagesForExtraction = messages.filter((m) => !isAdFlowMessage(m))
+    await synthesize(messagesForExtraction, agenda, vaultNotes ?? [])
+      .then((extraction) => extractFacts(conversationId, user.id, extraction))
+      .then(() => (isFarewell ? closeSession(conversationId, user.id).then(() => {}) : undefined))
+      .catch((err) => console.error("[chat] extraction failed:", err))
   }
 
   after(async () => {
@@ -689,9 +628,9 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Streaming path (opt-in; web client only) ──────────────────────────────
-  // Never streams: onboarding (JSON schema contract) or a scout-card opener (card rides
-  // in JSON). Ad short-circuits returned above. Mobile sends no stream flag → JSON.
-  if (stream === true && !isOnboarding && !scoutFind) {
+  // Never streams: a scout-card opener (card rides in JSON). Ad short-circuits returned
+  // above. Mobile sends no stream flag → JSON.
+  if (stream === true && !scoutFind) {
     const upstream = await geminiStreamFetch(systemPrompt, history).catch(() => null)
     if (upstream?.ok && upstream.body) {
       return ndjsonResponse(upstream.body, resolveFinal)
@@ -703,7 +642,7 @@ export async function POST(req: NextRequest) {
   // ── JSON path (identical contract to before streaming existed) ────────────
   let raw: string
   try {
-    raw = await geminiChat(systemPrompt, history, isOnboarding ? ONBOARDING_SCHEMA : undefined)
+    raw = await geminiChat(systemPrompt, history)
   } catch (gemErr) {
     console.error("[chat] Gemini chat failed, falling back to Cerebras:", gemErr)
     logEvent("chat_fallback", { err: String(gemErr) }, user.id)
@@ -719,22 +658,8 @@ export async function POST(req: NextRequest) {
   }
   console.log("[chat] raw:", raw.slice(0, 200))
 
-  // Interview path returns plain text. Only onboarding still uses a small JSON contract
-  // (reply + onboarding_complete) — no extraction, so the JSON-leak risk is negligible.
-  let reply = raw.trim()
-  if (isOnboarding) {
-    const parseOnboarding = (s: string) => {
-      const parsed = JSON.parse(s)
-      reply = parsed.reply ?? raw
-      onboardingComplete = parsed.onboarding_complete === true
-    }
-    try {
-      parseOnboarding(raw)
-    } catch {
-      const jsonMatch = raw.match(/\{[\s\S]*\}/)
-      if (jsonMatch) { try { parseOnboarding(jsonMatch[0]) } catch { /* fall back to raw */ } }
-    }
-  }
+  // Interview path returns plain text — no JSON contract, no extraction leak risk.
+  const reply = raw.trim()
   console.log("[chat] reply:", reply.slice(0, 150))
 
   resolveFinal(reply)
