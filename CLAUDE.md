@@ -53,7 +53,7 @@ The full session-by-session build log lives in **[CHANGELOG.md](CHANGELOG.md)** 
 6. `.mcp.json` is gitignored — Supabase MCP needs `SUPABASE_ACCESS_TOKEN` set locally in the file (not committed)
 7. **Scout digest (in-app welcome-back)** — built + verified, inert until keys. When a user returns after >48h, the opener can lead with one real local find (Ticketmaster city events; Bandsintown artist tours deferred until their API access) targeting `current_location` (fresh, 30-day TTL) else `home_location`. Built as a generalization of the ad-card flow. Needs `SCOUT_TICKETMASTER_KEY` in `.env.local`. Live test pending (owner mid-test with Giessen seeded). Plan: `docs/scout/2026-07-08-scout-digest-plan.md`.
 8. **Extraction live-test open items:** narrow the item→place relation (intent items pick up a stray link to the mall, not just the stores); persona confirm-before-ending + farewell→reload→carryover loop.
-9. **Landing page** built (`components/marketing/`, dark Revolut-style, consent-only-ads section); needs a visual-polish pass (hero legibility, consent-toggle feel, copy) then Vercel deploy. Spec: `docs/superpowers/specs/2026-07-03-landing-page-design.md`.
+9. **Landing page REBUILT (session 24)** — Portal-style 11-block page (dusk constellation hero → paper sections → night footer) with a working **email waitlist** (`waitlist` table RLS-no-policies + `POST /api/waitlist`; migration applied). Lexicon-clean (find/offer/suggestion, no "free because…"). **Owner content pass pending before deploy:** rewrite the FounderMemo draft letter, real graph screenshot → hero app-card swap slot, headline/statement copy review, `layout.tsx` metadata + OG tags, confirm personal Gmail as Contact link. Spec: `docs/superpowers/specs/2026-07-13-landing-portal-style-design.md`; plan: `docs/superpowers/plans/2026-07-13-landing-portal-rebuild.md` (old 07-03 spec superseded).
 10. **Gardener (`lib/graph/reconcile.ts`)** — whole-graph batch cleanup, built + verified (session 21). Run on command: `NODE_OPTIONS="--conditions=react-server" pnpm dlx tsx scripts/reconcile.ts` (dry-run) / `--apply` to mutate (soft + logged + reversible via `archived_at`). **Pending:** owner-gated `POST /api/admin/reconcile` + admin-panel "Tidy graph" button (preview→apply); later a per-user daily cron. Plan: `docs/graph/2026-07-10-graph-refinement-and-gardener-plan.md`.
 11. **Dated-event opener** — built + live-verified (session 21): a `scheduled_for` event surfaces in the interviewer's opener within a 14-day window, exactly once (`event_prompted_at`). Feeds the `current_location` freshness → You-link teardown. Plan: `docs/graph/2026-07-10-scheduled-events-and-location.md`.
 12. **Session 22 traction quick wins — built, LIVE CHECKS PENDING:** vault-wide recall (top-20 full + titles index, `lib/ai/vaultContext.ts`), persona carve-outs (recall + shopping asks engage; tasks/code still deflect), opt-in ndjson streaming, You-node bloom, share-my-graph PNG. Owner live checks: streamed turn + reload persistence, 3 persona probes, fresh-vault bloom, share PNG, one mobile turn. Opener-card client drop fixed → scout live test (item 7) unblocked. Extraction now dedups against whole-vault titles — watch `refines` quality next live extraction test. Review: `docs/reviews/2026-07-11-traction-review.md`; plan: `docs/superpowers/plans/2026-07-11-traction-quick-wins.md`. Still to build before shipping (owner decision): push notifications + email reminders.
@@ -63,7 +63,7 @@ The full session-by-session build log lives in **[CHANGELOG.md](CHANGELOG.md)** 
 The detailed extraction rules (entity types, tiers, gravity agenda, containment) and interviewer rules (agenda injection, attribute grouping, deflection, session-end) live in **[docs/engineering-canon.md](docs/engineering-canon.md)** — moved out of this file to keep session context lean. Read that doc before extraction or persona work.
 
 ## What's NOT done yet (next steps in order)
-1. Landing page **polish** — page is built (session 16, `components/marketing/`); needs a visual pass (hero legibility, consent-toggle feel, copy) per user feedback
+1. Landing page **content pass** — page rebuilt Portal-style (session 24, see checklist #9); owner still owes: FounderMemo rewrite, real hero screenshot, copy review, metadata/OG
 2. Vercel deployment — **pre-deploy blocker**: wire the "Delete account" row (currently a disabled placeholder in UserMenu) to real GDPR deletion + add privacy/legal copy. User menu itself is built (session 19: Profile+Gender, Graph settings, Manage nodes, Export, Logout).
 3. Scout digest — v1 built (see checklist #7); add Bandsintown when API access lands, interest APIs (TMDB/RAWG/etc.) later
 4. Affiliate link integration — Amazon Associates, Ticketmaster, Booking.com (Day 1 ad revenue, no advertiser deals needed)
@@ -110,12 +110,13 @@ apps/web/
 │   ├── (auth)/signup/page.tsx
 │   ├── (app)/graph/page.tsx        ← home screen (server component, passes data to GraphWrapper)
 │   ├── api/chat/route.ts           ← AI interviewer endpoint
+│   ├── api/waitlist/route.ts       ← public beta-waitlist signup (admin client, upsert-ignore dups)
 │   └── api/vault/export/route.ts   ← vault → hype-vault.zip (jszip, RLS user client)
 ├── components/
 │   ├── graph/
 │   │   ├── GraphCanvas.tsx         ← D3 graph (refreshTrigger + settings props; colors via lib/graph/palettes)
 │   │   └── GraphWrapper.tsx        ← client wrapper: shares refreshTrigger + graph settings across canvas/chat/menu
-│   ├── marketing/                  ← landing page (Landing, DemoGraph, ConsentPanel, TalkDemo, GrowthTimeline, Nav, Reveal, graphData)
+│   ├── marketing/                  ← Portal-style landing (session 24): Landing (11-block composition), SiteNav, Hero (dusk sky + app-shot card), Constellation (star-field graph, labels prop), Statement, IconGrid, DeepDives, OwnershipGrid, MiniGraph, PaletteShowcase, Steps, TheCatch, FounderMemo, Footer, WaitlistForm, Reveal, graphData
 │   ├── menu/UserMenu.tsx           ← avatar chip → slide-over drawer: Profile, Graph settings, Manage nodes, Export, Logout
 │   └── chat/
 │       ├── ChatPanel.tsx           ← AI chat overlay (onReply; reads ndjson streams, typewriter for JSON). Also owns the deterministic onboarding mode (ObStep state machine, beats 1–6 client-side → handoff to /api/chat for beat 7)
@@ -140,7 +141,7 @@ apps/web/
 │       ├── topics.ts               ← 31 topics (used for tags + graph display, not extraction classification)
 │       └── categories.ts           ← topic → subcategories map (kept, not used in routing)
 ├── types/database.ts               ← all TypeScript types
-└── supabase/schema.sql             ← full DB schema (incl. scout_cache: RLS-enabled, no policies = admin-client-only)
+└── supabase/schema.sql             ← full DB schema (incl. scout_cache + waitlist: RLS-enabled, no policies = admin-client-only)
 ```
 
 ## Owner
