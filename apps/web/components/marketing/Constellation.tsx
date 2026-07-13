@@ -21,10 +21,13 @@ const starColor = (c: string) => d3.interpolateRgb(c, "#ffffff")(0.5)
 export default function Constellation({
   className,
   fill = false,
+  labels = true,
 }: {
   className?: string
   /** Cover the container (hero backdrop) instead of letterboxing inside it. */
   fill?: boolean
+  /** Hub-node labels — off for backdrop instances where copy sits on top. */
+  labels?: boolean
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -68,15 +71,17 @@ export default function Constellation({
       .attr("fill", (d) => starColor(d.color))
       .attr("opacity", 0.95)
 
-    node.filter((d) => !!d.hub).append("text")
-      .text((d) => d.label)
-      .attr("dy", (d) => radius(d) + 14)
-      .attr("text-anchor", "middle")
-      .attr("font-size", "11px")
-      .attr("fill", "#ffffff")
-      .attr("pointer-events", "none")
-      .style("font-family", "var(--font-body), sans-serif")
-      .attr("opacity", 0)
+    if (labels) {
+      node.filter((d) => !!d.hub).append("text")
+        .text((d) => d.label)
+        .attr("dy", (d) => radius(d) + 14)
+        .attr("text-anchor", "middle")
+        .attr("font-size", "11px")
+        .attr("fill", "#ffffff")
+        .attr("pointer-events", "none")
+        .style("font-family", "var(--font-body), sans-serif")
+        .attr("opacity", 0)
+    }
 
     const sim = d3.forceSimulation<SimNode>(nodes)
       .force("link", d3.forceLink<SimNode, SimLink>(links).distance(90).strength(0.4))

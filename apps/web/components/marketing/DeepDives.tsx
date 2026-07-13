@@ -84,7 +84,7 @@ function GiveBackVisual() {
   return (
     <div className="space-y-3">
       {CARDS.map((c, i) => (
-        <div key={c.icon} className={`${cardBase} flex items-start gap-3 !p-4`} style={{ transform: `translateX(${i * 12 - 12}px)` }}>
+        <div key={c.icon} className={`${cardBase} flex items-start gap-3 !p-4`} style={{ transform: `translateX(${i * 24 - 24}px)` }}>
           <span aria-hidden="true">{c.icon}</span>
           <p className="font-body text-sm leading-relaxed text-ink">{c.text}</p>
         </div>
@@ -119,7 +119,7 @@ export default function DeepDives() {
     <div className="mx-auto max-w-5xl space-y-24 px-6 sm:space-y-32">
       <Row
         kicker="The interview"
-        color="#a78bfa"
+        color="#7c3aed"
         title="Just talk. It does the remembering."
         body={<p>Hype asks the kind of questions a good friend would — what you&apos;re into, where you&apos;ve been, what&apos;s coming up. Every answer becomes part of your graph, live, while you watch.</p>}
         visual={<InterviewVisual />}
@@ -127,14 +127,14 @@ export default function DeepDives() {
       <Row
         flip
         kicker="The vault"
-        color="#2dd4bf"
+        color="#0f766e"
         title="Your memory, in plain text you own."
         body={<p>Behind every node is a simple markdown note — readable by you, editable by you, exportable to Obsidian or anywhere else. No proprietary format, no lock-in. If you ever leave, everything goes with you.</p>}
         visual={<VaultVisual />}
       />
       <Row
         kicker="It gives back"
-        color="#67e8f9"
+        color="#0e7490"
         title="The longer it knows you, the more it gives back."
         body={<p>Ask it anything from your own life and it answers from your vault. It remembers the dates you&apos;d feel bad forgetting. And sometimes it holds up a mirror: who were you a year ago?</p>}
         visual={<GiveBackVisual />}
@@ -142,7 +142,7 @@ export default function DeepDives() {
       <Row
         flip
         kicker="Finds"
-        color="#f472b6"
+        color="#db2777"
         title="Finds you'd actually want. Only when you say yes."
         body={
           <>

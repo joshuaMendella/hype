@@ -7,9 +7,13 @@ export default function Footer() {
   return (
     <footer className="night-sky relative overflow-hidden">
       <span id="join" className="absolute top-0" aria-hidden="true" />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[70%] opacity-50">
-        <Constellation fill className="h-full w-full" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[70%] opacity-40">
+        <Constellation fill labels={false} className="h-full w-full" />
       </div>
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{ background: "radial-gradient(ellipse 55% 45% at 50% 40%, rgba(11,9,32,0.6) 0%, rgba(11,9,32,0) 70%)" }}
+      />
       <div className="relative mx-auto flex max-w-3xl flex-col items-center px-6 pb-40 pt-24 text-center sm:pt-32">
         <Reveal className="flex flex-col items-center">
           <h2 className="font-display text-balance text-[clamp(2.2rem,6vw,3.75rem)] font-extrabold leading-[1.03] tracking-[-0.02em] text-star">
