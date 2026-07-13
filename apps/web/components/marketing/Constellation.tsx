@@ -112,15 +112,15 @@ export default function Constellation({
         .attr("opacity", (d) => (shown.has(d.source.id) && shown.has(d.target.id) ? 0.18 : 0))
     }
 
+    const timers: ReturnType<typeof setTimeout>[] = []
     if (reduce) {
       nodes.forEach((n) => reveal(n, false))
     } else {
       const ordered = [...nodes].sort((a, b) => a.revealAt - b.revealAt)
-      ordered.forEach((n, i) => setTimeout(() => reveal(n, true), 150 + i * 110))
+      ordered.forEach((n, i) => timers.push(setTimeout(() => reveal(n, true), 150 + i * 110)))
     }
 
-    return () => { sim.stop() }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { timers.forEach(clearTimeout); sim.stop() }
   }, [])
 
   return (
