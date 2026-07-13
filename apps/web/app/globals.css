@@ -27,6 +27,20 @@
   --color-you-blue: #60a5fa;
   --color-you-purple: #a78bfa;
   --color-you-pink: #f472b6;
+
+  /* ── Portal-style rebuild tokens (2026-07-13) ─────────────────────
+     Dusk→day→night arc. paper/ink = the warm daylight sections;
+     dusk-* / horizon = the hero sky; star = text on night surfaces. */
+  --color-dusk-0: #08061c;
+  --color-dusk-1: #241a4d;
+  --color-dusk-2: #6b3d8f;
+  --color-horizon: #f2a65e;
+  --color-paper: #faf7f2;
+  --color-ink: #211a12;
+  --color-ink-soft: #6f6558;
+  --color-card: #ffffff;
+  --color-star: #f4f1ff;
+  --font-hand: var(--font-caveat);
 }
 
 /* Landing typography scope — Bricolage Grotesque (display), Hanken Grotesk (body),
@@ -66,6 +80,14 @@
 }
 .hype-float {
   animation: hype-float 9s ease-in-out infinite;
+}
+
+/* ── Portal-style rebuild skies ──────────────────────────────────── */
+.dusk-sky {
+  background: linear-gradient(180deg, #08061c 0%, #241a4d 42%, #6b3d8f 72%, #b85c72 88%, #f2a65e 100%);
+}
+.night-sky {
+  background: linear-gradient(180deg, #0b0920 0%, #1a1240 70%, #241a4d 100%);
 }
 
 /* Hero entrance: badge → headline → subcopy → CTAs rise in sequence on load. */
