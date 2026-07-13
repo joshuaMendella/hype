@@ -6,12 +6,13 @@ AI-powered personal knowledge graph. An AI interviewer learns about the user ove
 ## Business model (session 4 decision)
 **Single source of truth: [BUSINESS.md](BUSINESS.md)** — core principles, lifecycle phases, current phase, and the document map. On any business-model conflict between docs, BUSINESS.md wins. Key principle to never violate in code: ad consent is **per-moment in chat** (assistant asks each time) — no toggles, no ad-settings page; `profiles.ad_preferences` is deprecated.
 
-**Free to users. Revenue from consent-based conversational advertising.**
-- The data contract is transparent and front-and-center at onboarding: the interview builds a personal profile, that profile powers tailored offers, the user controls what they see and when
+**Free to users. Revenue from consent-based conversational advertising (internal framing only — see lexicon rule).**
+- **Positioning (evolved 2026-07-13): finds are a core product value, not a monetization story** — hyper-tailored suggestions from real interests with full transparency and per-moment control are a reason people join and stay, alongside "it remembers you." Never frame finds as why Hype is free ("free because…" is banned); free is a footnote. The phrase "a feature, not a fee" is retired even as messaging.
+- **User-facing lexicon (absolute, incl. marketing site): "find," "offer," "suggestion" — never "ad(s)."** Old slogan "Be in control of your ads…" retired; surviving working line: "Only what you want, when you want it."
+- The data contract is transparent and front-and-center at onboarding: the interview builds a personal profile, that profile powers tailored finds, the user controls what they see and when
 - When the vault detects a relevant intent (e.g. user wants a shirt), the interviewer offers to surface current deals — user says yes or no, nothing is forced
 - Advertisers pay CPC ($1.50–3.00) or CPA (8–12% of transaction) for verified, consent-confirmed referrals
 - Day-one revenue: affiliate links (Amazon Associates, Ticketmaster, Booking.com) — no advertiser relationships needed
-- Slogan: "Be in control of your ads. Only see what you want, when you want it."
 - Full analysis: `HYPE_BUSINESS_ASSESSMENT.md` in repo root
 
 ## Repo
