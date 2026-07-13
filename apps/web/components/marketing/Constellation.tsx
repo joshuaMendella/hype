@@ -126,7 +126,7 @@ export default function Constellation({
     }
 
     return () => { timers.forEach(clearTimeout); sim.stop() }
-  }, [])
+  }, [labels])
 
   return (
     <svg
