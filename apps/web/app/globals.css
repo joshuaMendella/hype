@@ -14,19 +14,56 @@
      Bricolage/Hanken/Space Mono inside `.landing` below; this is the app-wide fallback. */
   --font-display: var(--font-space-grotesk);
   --font-body: var(--font-inter);
+}
 
-  /* ── Landing redesign token system ──────────────────────────────────
-     void/mist/edge = ground + text + hairlines. ask (amber) is RESERVED: it means
-     "it's asking" and must never be used as decoration. you-* are the real node
-     colors — they must read polychrome across sections 1–3, not monochrome. */
-  --color-void: #0a0b0f;
-  --color-mist: #e7e9ee;
-  --color-edge: #22262f;
+/* ── Landing token layer ─────────────────────────────────────────────
+   Dark-only, semantic, shadcn-compatible names. `ask` (amber) is RESERVED: it only
+   ever means "the AI is asking consent" — never decoration. node-* are UI accent
+   hues; the hero graph itself pulls real topic colors from lib/graph/palettes.ts. */
+@theme {
+  --color-surface: #12141a;
+  --color-border: #22262f;
+  --color-muted-foreground: #9aa1ad;
+  --color-primary: #e7e9ee;
+  --color-primary-foreground: #0a0b0f;
   --color-ask: #fbbf24;
-  --color-you-green: #4ade80;
-  --color-you-blue: #60a5fa;
-  --color-you-purple: #a78bfa;
-  --color-you-pink: #f472b6;
+  --color-node-green: #4ade80;
+  --color-node-blue: #60a5fa;
+  --color-node-purple: #a78bfa;
+  --color-node-pink: #f472b6;
+
+  /* Fluid type scale — text-display/title/lead/body-lg/label utilities. */
+  --text-display: clamp(2.75rem, 8vw, 6rem);
+  --text-display--line-height: 1;
+  --text-display--letter-spacing: -0.02em;
+  --text-title: clamp(2rem, 4vw, 3rem);
+  --text-title--line-height: 1.08;
+  --text-title--letter-spacing: -0.02em;
+  --text-lead: clamp(1.125rem, 1.5vw, 1.25rem);
+  --text-lead--line-height: 1.6;
+  --text-body-lg: 1.0625rem;
+  --text-body-lg--line-height: 1.6;
+  --text-label: 0.8125rem;
+  --text-label--line-height: 1.4;
+  --text-label--letter-spacing: 0.15em;
+
+  /* One rhythm token: fluid vertical section padding. */
+  --spacing-section: clamp(4rem, 10vw, 8rem);
+
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1.25rem;
+
+  /* Dark ground kills drop shadows — two tokens only. */
+  --shadow-panel: 0 24px 60px -30px rgb(0 0 0 / 0.7);
+  --shadow-glow: 0 0 50px -8px rgb(231 233 238 / 0.45);
+}
+
+/* The landing page is committed-dark; these override the app-default light values
+   inside `.landing` only (they feed the @theme inline vars above). */
+.landing {
+  --background: #0a0b0f;
+  --foreground: #e7e9ee;
 }
 
 /* Landing typography scope — Bricolage Grotesque (display), Hanken Grotesk (body),
@@ -44,158 +81,6 @@
   --font-space-grotesk: var(--font-bricolage);
   --font-inter: var(--font-hanken);
   --font-geist-mono: var(--font-space-mono);
-}
-
-/* ── Landing page motion ─────────────────────────────────────────────
-   Scroll-reveal: elements start lowered + transparent, add .is-in to settle.
-   Ambient float: the hero graph breathes so it never feels frozen. */
-.reveal {
-  opacity: 0;
-  transform: translateY(28px);
-  transition: opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: opacity, transform;
-}
-.reveal.is-in {
-  opacity: 1;
-  transform: none;
-}
-@keyframes hype-float {
-  0%, 100% { transform: translate(0, 0); }
-  50% { transform: translate(0, -10px); }
-}
-.hype-float {
-  animation: hype-float 9s ease-in-out infinite;
-}
-
-/* Hero entrance: badge → headline → subcopy → CTAs rise in sequence on load. */
-@keyframes hero-in {
-  from { opacity: 0; transform: translateY(22px); }
-  to { opacity: 1; transform: none; }
-}
-.hero-in {
-  opacity: 0;
-  animation: hero-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-  animation-delay: var(--hero-delay, 0ms);
-}
-
-/* Gradient ink: key phrases are colored by the graph's own topic palette. */
-@keyframes ink-pan {
-  0%, 100% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-}
-/* you-spectrum only — amber is reserved for the asking section + Thread flood, never decoration. */
-.graph-ink {
-  background: linear-gradient(100deg, #4ade80, #60a5fa, #a78bfa, #f472b6, #60a5fa, #4ade80);
-  background-size: 300% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: ink-pan 9s ease-in-out infinite;
-}
-.amber-ink {
-  background: linear-gradient(100deg, #fbbf24, #fb923c, #fbbf24);
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: ink-pan 7s ease-in-out infinite;
-}
-
-/* Consent-panel offer card arriving — you flipped a switch, the offer shows up. */
-@keyframes offer-in {
-  from { opacity: 0; transform: translateY(14px) scale(0.96); }
-  to { opacity: 1; transform: none; }
-}
-.offer-in {
-  animation: offer-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-/* ── Landing light theme ─────────────────────────────────────────────
-   ThemeToggle sets data-theme="light" on <html>. Only marketing components use
-   the `light:` variant, so the app's dark graph screen is unaffected. */
-@custom-variant light (&:where([data-theme="light"], [data-theme="light"] *));
-
-:root {
-  /* DemoGraph/TalkDemo SVG colors are set from JS, so they live as vars. */
-  --g-link-self: #ffffff40;
-  --g-link-brand: #a78bfa73;
-  --g-link-relation: #ffffff59;
-  --g-label: #ffffff99;
-  --g-label-hub: #ffffffd9;
-  --g-you: #ffffff;
-}
-[data-theme="light"] {
-  --g-link-self: #00000059;
-  --g-link-brand: #7c3aed8c;
-  --g-link-relation: #0000006b;
-  --g-label: #000000b3;
-  --g-label-hub: #000000e6;
-  --g-you: #141414;
-}
-/* Inside an always-dark surface (the phone mocks), the graph keeps dark-mode colors. */
-.graph-dark {
-  --g-link-self: #ffffff40;
-  --g-link-brand: #a78bfa73;
-  --g-link-relation: #ffffff59;
-  --g-label: #ffffff99;
-  --g-label-hub: #ffffffd9;
-  --g-you: #ffffff;
-}
-/* Gradient inks need darker stops to stay legible on paper. */
-[data-theme="light"] .graph-ink {
-  background-image: linear-gradient(100deg, #15803d, #2563eb, #7c3aed, #db2777, #2563eb, #15803d);
-}
-[data-theme="light"] .amber-ink {
-  background-image: linear-gradient(100deg, #d97706, #ea580c, #d97706);
-}
-
-/* ── The Thread ──────────────────────────────────────────────────────
-   Scroll spine (components/marketing/Thread.tsx). A pulse dot converging into the
-   gold bloom at the asking section, and a one-shot breathe on the terminal CTA node. */
-@keyframes thread-converge {
-  0% { transform: translateY(0) scale(1); opacity: 0.95; }
-  80% { opacity: 0.9; }
-  100% { transform: translateY(var(--thread-dist, 0px)) scale(0.35); opacity: 0; }
-}
-.thread-converge-dot {
-  animation: thread-converge 900ms cubic-bezier(0.4, 0, 0.6, 1) both;
-}
-@keyframes thread-bloom {
-  0% { transform: scale(1); }
-  35% { transform: scale(2.4); }
-  100% { transform: scale(1.3); }
-}
-.thread-bloom {
-  animation: thread-bloom 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-@keyframes thread-breathe {
-  0%, 100% { transform: scale(1); }
-  45% { transform: scale(1.06); }
-}
-/* CTA button "breathes once" as the terminal Thread node — fires when its Reveal
-   wrapper settles into view (descendant of .reveal.is-in), not on page load. */
-.reveal.is-in .cta-breathe-target {
-  animation: thread-breathe 1.6s cubic-bezier(0.22, 1, 0.36, 1) 900ms 1 both;
-}
-/* A fact lands in the chat → a small node buds off (TalkDemo). */
-@keyframes node-bud {
-  0% { transform: scale(0); opacity: 0; }
-  60% { transform: scale(1.3); opacity: 1; }
-  100% { transform: scale(1); opacity: 1; }
-}
-.node-bud {
-  animation: node-bud 500ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .reveal { opacity: 1; transform: none; transition: none; }
-  .hype-float { animation: none; }
-  .hero-in { opacity: 1; animation: none; }
-  .graph-ink, .amber-ink { animation: none; }
-  .offer-in { animation: none; }
-  .thread-converge-dot, .thread-bloom, .node-bud { animation: none; }
-  .reveal.is-in .cta-breathe-target { animation: none; }
 }
 
 @media (prefers-color-scheme: dark) {
