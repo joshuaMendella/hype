@@ -8,7 +8,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}))
-  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : ""
+  const email = body && typeof body.email === "string" ? body.email.trim().toLowerCase() : ""
   if (!email || email.length > 254 || !EMAIL_RE.test(email)) {
     return NextResponse.json({ error: "invalid_email" }, { status: 400 })
   }
