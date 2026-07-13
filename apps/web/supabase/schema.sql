@@ -241,3 +241,12 @@ CREATE TABLE IF NOT EXISTS public.events (
 ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS idx_events_created ON public.events(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_kind ON public.events(kind, created_at DESC);
+
+-- Beta waitlist — public signups from the landing page.
+-- RLS ENABLED, NO policies: service-role admin client only (same pattern as scout_cache).
+CREATE TABLE IF NOT EXISTS public.waitlist (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE public.waitlist ENABLE ROW LEVEL SECURITY;
