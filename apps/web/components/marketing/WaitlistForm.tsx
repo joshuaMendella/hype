@@ -33,7 +33,7 @@ export default function WaitlistForm() {
   }
 
   return (
-    <form onSubmit={submit} className="flex w-full max-w-md flex-col gap-3 sm:flex-row">
+    <form onSubmit={submit} className="relative flex w-full max-w-md flex-col gap-3 sm:flex-row">
       <input
         type="email"
         required
@@ -51,7 +51,7 @@ export default function WaitlistForm() {
         {state === "busy" ? "Joining…" : "Join the waitlist"}
       </button>
       {state === "error" && (
-        <p className="font-body text-xs text-[#fca5a5] sm:absolute sm:mt-14" role="alert">
+        <p className="font-body text-xs text-[#fca5a5] sm:absolute sm:top-full sm:left-0 sm:mt-2" role="alert">
           That didn&apos;t work — check the email and try again.
         </p>
       )}

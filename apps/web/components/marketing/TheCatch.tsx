@@ -10,8 +10,8 @@ export default function TheCatch() {
           Hype is free — no card, no trial clock, no premium wall.
         </p>
         <p className="font-body mt-4 text-pretty leading-relaxed text-ink-soft">
-          Here's the business model, in full: when you say yes to a find and it leads
-          to a purchase, the brand pays us a referral fee. That's it. Brands get a
+          Here&apos;s the business model, in full: when you say yes to a find and it leads
+          to a purchase, the brand pays us a referral fee. That&apos;s it. Brands get a
           click — never your data. Your graph never leaves Hype, not in any form, not
           ever.
         </p>

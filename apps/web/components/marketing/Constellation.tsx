@@ -5,7 +5,7 @@ import * as d3 from "d3"
 import { DEMO_NODES, DEMO_LINKS, type DemoNode, type DemoLink } from "./graphData"
 
 // The hero star field: the demo graph re-skinned as a constellation. Forked from
-// DemoGraph (which the old landing still uses) rather than parameterized — the two
+// DemoGraph (since deleted with the old page) rather than parameterized — the two
 // skins share no runtime and DemoGraph dies with the old page.
 // Nodes render as glowing stars (topic color washed toward starlight), links as
 // faint constellation lines, labels on hubs only.

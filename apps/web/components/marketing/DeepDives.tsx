@@ -121,7 +121,7 @@ export default function DeepDives() {
         kicker="The interview"
         color="#a78bfa"
         title="Just talk. It does the remembering."
-        body={<p>Hype asks the kind of questions a good friend would — what you're into, where you've been, what's coming up. Every answer becomes part of your graph, live, while you watch.</p>}
+        body={<p>Hype asks the kind of questions a good friend would — what you&apos;re into, where you&apos;ve been, what&apos;s coming up. Every answer becomes part of your graph, live, while you watch.</p>}
         visual={<InterviewVisual />}
       />
       <Row
@@ -136,7 +136,7 @@ export default function DeepDives() {
         kicker="It gives back"
         color="#67e8f9"
         title="The longer it knows you, the more it gives back."
-        body={<p>Ask it anything from your own life and it answers from your vault. It remembers the dates you'd feel bad forgetting. And sometimes it holds up a mirror: who were you a year ago?</p>}
+        body={<p>Ask it anything from your own life and it answers from your vault. It remembers the dates you&apos;d feel bad forgetting. And sometimes it holds up a mirror: who were you a year ago?</p>}
         visual={<GiveBackVisual />}
       />
       <Row
@@ -146,7 +146,7 @@ export default function DeepDives() {
         title="Finds you'd actually want. Only when you say yes."
         body={
           <>
-            <p>When you mention your running shoes are falling apart, Hype asks if you'd like to see a couple of current deals. Say yes and you get one clearly-labeled find, matched to what you actually said.</p>
+            <p>When you mention your running shoes are falling apart, Hype asks if you&apos;d like to see a couple of current deals. Say yes and you get one clearly-labeled find, matched to what you actually said.</p>
             <p>Say no and the conversation simply moves on — it never pushes, never sneaks. Only what you want, when you want it.</p>
           </>
         }

@@ -8,21 +8,21 @@ export default function FounderMemo() {
         <p className="font-mono text-xs font-bold uppercase tracking-[0.22em] text-ink-soft">Founder memo</p>
         <div className="font-body mt-6 space-y-4 text-pretty leading-relaxed text-ink">
           <p>
-            The graph at the top of this page started as a question I couldn't shake:
+            The graph at the top of this page started as a question I couldn&apos;t shake:
             why does every app in my life know something about me, while the one thing
-            that never exists is a memory that's actually <em>mine</em>?
+            that never exists is a memory that&apos;s actually <em>mine</em>?
           </p>
           <p>
-            I'm building Hype alone — design, code, and the occasional 2am bug. What I
+            I&apos;m building Hype alone — design, code, and the occasional 2am bug. What I
             want is simple to say and hard to build: an AI you talk to like a friend,
             that remembers like one, and that answers to you and nobody else. The graph
             is the whole deal — everything it knows, drawn where you can see it,
             correct it, or delete it.
           </p>
           <p>
-            If you join the beta, you're not a growth metric. You're one of the first
-            twenty people whose feedback decides what this becomes. You'll have my
-            email, and I'll actually reply.
+            If you join the beta, you&apos;re not a growth metric. You&apos;re one of the first
+            twenty people whose feedback decides what this becomes. You&apos;ll have my
+            email, and I&apos;ll actually reply.
           </p>
           <p>Come build a memory with me.</p>
         </div>
