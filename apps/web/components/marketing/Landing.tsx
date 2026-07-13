@@ -194,12 +194,13 @@ export default function Landing() {
         <div className="mx-auto max-w-5xl px-6 py-24 sm:py-32">
           <Reveal className="mx-auto max-w-3xl text-center">
             <ThreadAnchor id="asking" color="#FBBF24" amber />
-            <Kicker color="#FBBF24" tone="dark" center amber>it asks first</Kicker>
+            <Kicker color="#FBBF24" tone="dark" center amber>finds, when you want them</Kicker>
             <h2 className="font-display mt-4 text-[clamp(2.5rem,6.5vw,4.5rem)] font-extrabold leading-[1.0] tracking-[-0.02em] text-[#1a1200]">
-              It always asks first.
+              Finds you&apos;ll actually want.
             </h2>
             <p className="mx-auto mt-6 max-w-xl text-[1.25rem] leading-relaxed text-[#43300a]">
-              Nothing reaches you unless you say yes.
+              Hyper-tailored to what you&apos;ve really shared — and nothing reaches
+              you unless you say yes.
             </p>
           </Reveal>
 
