@@ -233,7 +233,7 @@ export const ROADMAP: RoadmapArea[] = [
       { title: "Privacy / legal copy", status: "planned", launchBlocker: true },
       { title: "Vercel deployment", status: "planned", launchBlocker: true },
       { title: "Production env keys (incl. SCOUT_TICKETMASTER_KEY)", status: "planned" },
-      { title: "Admin roadmap tracker (this page)", status: "in-progress" },
+      { title: "Admin roadmap tracker (this page)", status: "done", note: "Session 25" },
     ],
   },
 ]
